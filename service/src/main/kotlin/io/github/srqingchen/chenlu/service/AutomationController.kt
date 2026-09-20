@@ -1,5 +1,6 @@
 package io.github.srqingchen.chenlu.service
 
+import io.github.srqingchen.chenlu.core.common.ChenLuLog
 import io.github.srqingchen.chenlu.core.model.AutomationRunState
 import io.github.srqingchen.chenlu.core.model.TapConfig
 import io.github.srqingchen.chenlu.engine.api.EngineRegistry
@@ -67,12 +68,14 @@ object AutomationController {
         _state.update {
             it.copy(running = true, executedCount = 0L, activeEngineId = engine.id, lastError = null)
         }
+        ChenLuLog.i("controller", "任务启动：engine=${engine.id}, config=${_state.value.config}")
         loopJob = scope.launch {
             var consecutiveFailures = 0
             try {
                 while (isActive) {
                     val live = engine.state.value
                     if (live is EngineState.Unavailable) {
+                        ChenLuLog.e("controller", "引擎掉线，任务停止：${live.reason}")
                         _state.update { it.copy(running = false, lastError = "引擎掉线：${live.reason}") }
                         return@launch
                     }
@@ -83,7 +86,11 @@ object AutomationController {
                         _state.update { it.copy(executedCount = it.executedCount + 1L, lastError = null) }
                     } else {
                         consecutiveFailures++
-                        if (consecutiveFailures >= FAILURE_THRESHOLD) {
+                        if (consecutiveFailures == FAILURE_THRESHOLD) {
+                            ChenLuLog.e(
+                                "controller",
+                                "连续注入失败 $consecutiveFailures 次（engine=${engine.id}），详见上方日志",
+                            )
                             _state.update {
                                 it.copy(lastError = "点击注入连续失败 ${consecutiveFailures} 次，请检查引擎状态")
                             }

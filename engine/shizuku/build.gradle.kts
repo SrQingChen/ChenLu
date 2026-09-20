@@ -8,6 +8,7 @@ android {
 
 dependencies {
     api(project(":engine:api"))
+    implementation(project(":core:common"))
     implementation(project(":core:shizuku"))
     implementation(libs.kotlinx.coroutines.android)
 }

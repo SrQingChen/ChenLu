@@ -25,7 +25,8 @@ class InjectorProxy(private val binder: IBinder) {
         }
     }
 
-    fun injectTap(x: Float, y: Float, durationMs: Long): Boolean {
+    /** @return InjectorService.RESULT_OK / RESULT_FALLBACK_CMD / RESULT_FAIL。 */
+    fun injectTap(x: Float, y: Float, durationMs: Long): Int {
         val data = Parcel.obtain()
         val reply = Parcel.obtain()
         return try {
@@ -36,7 +37,21 @@ class InjectorProxy(private val binder: IBinder) {
             data.writeLong(durationMs)
             binder.transact(TRANSACTION_INJECT_TAP, data, reply, 0)
             reply.readException()
-            reply.readInt() != 0
+            reply.readInt()
+        } finally {
+            reply.recycle()
+            data.recycle()
+        }
+    }
+
+    fun lastError(): String {
+        val data = Parcel.obtain()
+        val reply = Parcel.obtain()
+        return try {
+            data.writeInterfaceToken(DESCRIPTOR)
+            binder.transact(TRANSACTION_LAST_ERROR, data, reply, 0)
+            reply.readException()
+            reply.readString().orEmpty()
         } finally {
             reply.recycle()
             data.recycle()
@@ -60,6 +75,7 @@ class InjectorProxy(private val binder: IBinder) {
         private const val DESCRIPTOR = "io.github.srqingchen.chenlu.core.shizuku.IInjector"
         private const val TRANSACTION_VERSION = IBinder.FIRST_CALL_TRANSACTION
         private const val TRANSACTION_INJECT_TAP = IBinder.FIRST_CALL_TRANSACTION + 1
+        private const val TRANSACTION_LAST_ERROR = IBinder.FIRST_CALL_TRANSACTION + 2
         private const val TRANSACTION_DESTROY = 16777114
     }
 }

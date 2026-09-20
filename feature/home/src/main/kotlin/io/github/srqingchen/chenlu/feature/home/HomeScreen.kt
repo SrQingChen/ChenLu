@@ -1,6 +1,7 @@
 package io.github.srqingchen.chenlu.feature.home
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -28,6 +29,7 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -38,12 +40,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.srqingchen.chenlu.core.common.ChenLuLog
 import io.github.srqingchen.chenlu.core.model.AutomationRunState
 import io.github.srqingchen.chenlu.core.shizuku.ShizukuManager
 import io.github.srqingchen.chenlu.core.shizuku.ShizukuState
@@ -167,6 +173,22 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                     }
                 },
             )
+
+            if (!engines.any { it.id == "accessibility" && it.state.value is EngineState.Ready }) {
+                AccessibilityHelpCard(
+                    onOpenAppDetails = {
+                        context.startActivity(
+                            Intent(
+                                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                Uri.parse("package:${context.packageName}"),
+                            ),
+                        )
+                    },
+                )
+            }
+
+            SectionHeader("诊断")
+            DiagnosticCard(context)
 
             SectionHeader("Shizuku 激活指引")
             ShizukuGuideCard()
@@ -467,14 +489,95 @@ private fun TextButtonLike(text: String, enabled: Boolean = true, onClick: () ->
 }
 
 @Composable
+private fun AccessibilityHelpCard(onOpenAppDetails: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                "无障碍列表中找不到尘露？",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                "1. 打开尘露的应用详情 → 右上角 ⋮ → 「允许受限设置」" +
+                    "（Android 13+ 对侧载安装应用的无障碍限制）；\n" +
+                    "2. 再到 设置 → 更多设置 → 无障碍 → 已下载的应用，开启「尘露 · 手势引擎」。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(onClick = onOpenAppDetails) { Text("打开尘露应用详情") }
+        }
+    }
+}
+
+@Composable
+private fun DiagnosticCard(context: Context) {
+    val entries by ChenLuLog.entries.collectAsStateWithLifecycle()
+    val clipboard = LocalClipboardManager.current
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                "最近日志（最新在上）",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            if (entries.isEmpty()) {
+                Text(
+                    "暂无日志。开启引擎并执行一次点击后，这里会记录注入结果与失败原因。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                entries.takeLast(12).reversed().forEach { e ->
+                    Text(
+                        ChenLuLog.format(e),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = when (e.level) {
+                            'E' -> MaterialTheme.colorScheme.error
+                            'W' -> MaterialTheme.colorScheme.tertiary
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { clipboard.setText(AnnotatedString(ChenLuLog.dump())) }) {
+                    Text("复制")
+                }
+                OutlinedButton(onClick = { shareLogFile(context) }) { Text("导出") }
+                TextButton(onClick = { ChenLuLog.clear() }) { Text("清空") }
+            }
+        }
+    }
+}
+
+private fun shareLogFile(context: Context) {
+    runCatching {
+        val dir = java.io.File(context.cacheDir, "logs").apply { mkdirs() }
+        val file = java.io.File(dir, "chenlu_log_${System.currentTimeMillis()}.txt")
+        file.writeText(ChenLuLog.dump())
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(intent, "分享尘露日志"))
+    }.onFailure {
+        ChenLuLog.e("diag", "导出日志失败: ${it.message}")
+    }
+}
+
+@Composable
 private fun ShizukuGuideCard() {
     Card(modifier = Modifier.fillMaxWidth()) {
         Text(
             "1. 安装 Shizuku（moe.shizuku.privileged.api）；\n" +
                 "2. 开发者选项 → 无线调试 → 使用配对码配对（仅首次）；\n" +
                 "3. 在 Shizuku 内点击「启动」；\n" +
-                "4. 回到尘露点击「授权」。\n" +
-                "注：设备重启后需重新启动 Shizuku；小米设备请同时开启「USB 调试（安全设置）」。",
+                "4. 回到尘露点击「授权」。\n\n" +
+                "小米/澎湃重要：请确认开发者选项中「USB 调试（安全设置）」已开启，" +
+                "这是系统对模拟输入的防护开关，未开启时 Shizuku 注入会被拒绝" +
+                "（该开关通常要求插入 SIM 卡并登录小米账号）。设备重启后需重新启动 Shizuku。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(16.dp),

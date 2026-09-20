@@ -1,6 +1,8 @@
 package io.github.srqingchen.chenlu.engine.shizuku
 
+import io.github.srqingchen.chenlu.core.common.ChenLuLog
 import io.github.srqingchen.chenlu.core.model.Point
+import io.github.srqingchen.chenlu.core.shizuku.InjectorService
 import io.github.srqingchen.chenlu.core.shizuku.ShizukuManager
 import io.github.srqingchen.chenlu.core.shizuku.ShizukuState
 import io.github.srqingchen.chenlu.engine.api.EngineCapabilities
@@ -13,11 +15,12 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.withContext
 
 /**
- * Shizuku 引擎（引擎B）：UserService + InputManager.injectInputEvent。
+ * Shizuku 引擎（引擎B）：UserService + InputManager.injectInputEvent（失败自动降级 input tap）。
  * shell 级注入、零进程创建开销；理论数百 Hz（真机基准待标定）。
  */
 class ShizukuInputEngine : InputEngine {
@@ -32,6 +35,7 @@ class ShizukuInputEngine : InputEngine {
 
     override val state: StateFlow<EngineState> =
         ShizukuManager.state
+            .onEach { ChenLuLog.i("shizuku", "通道状态 -> $it") }
             .map { shizuku ->
                 when (shizuku) {
                     ShizukuState.NotInstalled -> EngineState.Unavailable("Shizuku 未安装")
@@ -50,10 +54,32 @@ class ShizukuInputEngine : InputEngine {
             )
 
     override suspend fun tap(point: Point, spec: TapSpec): Boolean = withContext(Dispatchers.IO) {
-        val injector = ShizukuManager.injector ?: return@withContext false
-        runCatching {
+        val injector = ShizukuManager.injector
+        if (injector == null) {
+            ChenLuLog.e("shizuku", "注入服务未连接（injector=null），当前状态=${ShizukuManager.state.value}")
+            return@withContext false
+        }
+        val code = runCatching {
             injector.injectTap(point.x, point.y, spec.durationMs)
-        }.getOrDefault(false)
+        }.getOrElse { t ->
+            ChenLuLog.e("shizuku", "Binder 调用异常: ${t.javaClass.simpleName}: ${t.message}")
+            -1
+        }
+        when (code) {
+            InjectorService.RESULT_OK -> true
+            InjectorService.RESULT_FALLBACK_CMD -> {
+                ChenLuLog.w(
+                    "shizuku",
+                    "已降级为 input 命令注入（较慢）。原因: ${runCatching { injector.lastError() }.getOrDefault("?")}",
+                )
+                true
+            }
+            else -> {
+                val detail = runCatching { injector.lastError() }.getOrDefault("Binder 调用失败")
+                ChenLuLog.e("shizuku", "注入失败 code=$code: $detail")
+                false
+            }
+        }
     }
 
     override suspend fun cancel() {
