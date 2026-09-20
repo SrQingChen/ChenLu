@@ -93,7 +93,10 @@ class ControlBallView(context: Context) : View(context) {
         lp.y += dy.toInt()
         (context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager)
             ?.updateViewLayout(this, lp)
-        onCenterChanged?.invoke(lp.x + width / 2f, lp.y + height / 2f)
+        // 用屏幕绝对坐标系上报球心（含状态栏区域），与注入坐标系一致
+        val loc = IntArray(2)
+        getLocationOnScreen(loc)
+        onCenterChanged?.invoke(loc[0] + width / 2f, loc[1] + height / 2f)
     }
 
     companion object {

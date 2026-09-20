@@ -6,6 +6,7 @@ import android.os.IBinder
 import android.os.Parcel
 import android.os.SystemClock
 import android.view.InputDevice
+import android.view.InputEvent
 import android.view.MotionEvent
 import androidx.annotation.Keep
 import java.util.concurrent.TimeUnit
@@ -70,9 +71,20 @@ class InjectorService : Binder() {
     private fun injectTap(x: Float, y: Float, durationMs: Long): Int {
         lastError = ""
         val im = inputManager
-        val inject = injectMethod
-        if (im == null || inject == null) {
-            lastError = "反射获取失败: InputManager=${im != null}, injectInputEvent=${inject != null}"
+        if (im == null || injectMethod == null) {
+            lastError = buildString {
+                append("反射获取失败: InputManager=${im != null}")
+                if (injectMethod == null) {
+                    append("; injectInputEvent 未匹配到可用签名")
+                    append(
+                        if (injectCandidates.isEmpty()) {
+                            "（方法不存在）"
+                        } else {
+                            "，候选=" + injectCandidates.joinToString("; ") { it.toGenericString() }
+                        },
+                    )
+                }
+            }
             return fallbackInputTap(x, y)
         }
 
@@ -84,7 +96,7 @@ class InjectorService : Binder() {
             PRESSURE, SIZE, 0, 1f, 1f, 0, 0,
         ).apply { source = InputDevice.SOURCE_TOUCHSCREEN }
         val okDown = try {
-            (inject.invoke(im, down, MODE_WAIT_FOR_FINISH) as? Boolean) == true
+            invokeInject(im, down)
         } catch (t: Throwable) {
             lastError = "injectInputEvent(DOWN) 异常: ${t.javaClass.simpleName}: ${t.message}"
             false
@@ -98,7 +110,7 @@ class InjectorService : Binder() {
                 PRESSURE, SIZE, 0, 1f, 1f, 0, 0,
             ).apply { source = InputDevice.SOURCE_TOUCHSCREEN }
             val okUp = try {
-                (inject.invoke(im, up, MODE_WAIT_FOR_FINISH) as? Boolean) == true
+                invokeInject(im, up)
             } catch (t: Throwable) {
                 lastError = "injectInputEvent(UP) 异常: ${t.javaClass.simpleName}: ${t.message}"
                 false
@@ -144,20 +156,46 @@ class InjectorService : Binder() {
         }.getOrNull()
     }
 
-    private val injectMethod: java.lang.reflect.Method? by lazy {
+    /** 全部 injectInputEvent 重载（含厂商扩展），用于自适应匹配与诊断回传。 */
+    private val injectCandidates: List<java.lang.reflect.Method> by lazy {
         runCatching {
-            Class.forName("android.hardware.input.InputManager")
-                .getMethod(
-                    "injectInputEvent",
-                    MotionEvent::class.java,
-                    Int::class.javaPrimitiveType,
-                )
-        }.getOrNull()
+            val cls = Class.forName("android.hardware.input.InputManager")
+            (cls.methods + cls.declaredMethods).distinctBy { it.toGenericString() }
+                .filter { it.name == "injectInputEvent" }
+        }.getOrDefault(emptyList())
+    }
+
+    /**
+     * 自适应挑选签名：AOSP 为 (InputEvent, int)；
+     * 兼容厂商新增尾参的 (InputEvent, int, int) 变体。
+     */
+    private val injectMethod: java.lang.reflect.Method? by lazy {
+        injectCandidates.firstOrNull { m ->
+            m.parameterCount == 2 &&
+                InputEvent::class.java.isAssignableFrom(m.parameterTypes[0]) &&
+                m.parameterTypes[1] == Int::class.javaPrimitiveType
+        } ?: injectCandidates.firstOrNull { m ->
+            m.parameterCount == 3 &&
+                InputEvent::class.java.isAssignableFrom(m.parameterTypes[0]) &&
+                m.parameterTypes[1] == Int::class.javaPrimitiveType &&
+                m.parameterTypes[2] == Int::class.javaPrimitiveType
+        }
+    }
+
+    /** 按匹配到的签名调用注入；签名未知返回 false。 */
+    private fun invokeInject(im: Any, event: MotionEvent): Boolean {
+        val method = injectMethod ?: return false
+        val result = when (method.parameterCount) {
+            2 -> method.invoke(im, event, MODE_WAIT_FOR_FINISH)
+            3 -> method.invoke(im, event, MODE_WAIT_FOR_FINISH, 0)
+            else -> return false
+        }
+        return result as? Boolean ?: false
     }
 
     companion object {
         /** 与 UserServiceArgs.version 联动：不匹配时 Shizuku 自动销毁旧服务进程。 */
-        const val VERSION = 2
+        const val VERSION = 3
 
         const val RESULT_FAIL = 0
         const val RESULT_OK = 1

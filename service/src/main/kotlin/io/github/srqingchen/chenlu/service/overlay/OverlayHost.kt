@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.PixelFormat
 import android.provider.Settings
 import android.view.Gravity
+import android.view.View
 import android.view.WindowManager
 import io.github.srqingchen.chenlu.core.model.Point
 import io.github.srqingchen.chenlu.service.AutomationController
@@ -12,9 +13,8 @@ import io.github.srqingchen.chenlu.service.AutomationService
 /**
  * 悬浮窗宿主：控制球（可触摸，启停/定位）+ 十字准星（触摸穿透，标记点击目标）。
  *
- * 交互流：拖动控制球时准星跟手 → 松手后球吸附屏幕边缘、准星停留在松手处
- * （准星中心即点击目标点）→ 单击球启停。所有窗口 TYPE_APPLICATION_OVERLAY，
- * 需用户授予“显示悬浮窗”权限。
+ * 所有坐标统一使用屏幕绝对坐标系（getLocationOnScreen 换算，含状态栏区域），
+ * 与注入事件坐标系一致——修复部分 ROM 上悬浮窗坐标系原点不含状态栏导致的偏移。
  */
 object OverlayHost {
 
@@ -52,14 +52,19 @@ object OverlayHost {
         ball = view
         ballParams = params
 
-        // 准星初始位置：已有目标点则用之，否则以球心初始化
-        val target = AutomationController.state.value.config.target
-        val initialCenter = if (target != Point.ZERO) {
-            target
-        } else {
-            Point(params.x + size / 2f, params.y + size / 2f)
+        // 首帧布局完成后初始化准星：已有目标用目标，否则以球心为准并写回配置（保证两者一致）
+        view.post {
+            val center = ballScreenCenter()
+            val target = AutomationController.state.value.config.target
+            if (target != Point.ZERO) {
+                showCrosshair(appContext, target)
+            } else {
+                center?.let {
+                    AutomationController.updateConfig { c -> c.copy(target = it) }
+                    showCrosshair(appContext, it)
+                }
+            }
         }
-        showCrosshair(appContext, initialCenter)
         return true
     }
 
@@ -72,6 +77,14 @@ object OverlayHost {
         ballParams = null
         crosshair = null
         crosshairParams = null
+    }
+
+    private fun ballScreenCenter(): Point? {
+        val view = ball ?: return null
+        if (view.width == 0) return null
+        val loc = IntArray(2)
+        view.getLocationOnScreen(loc)
+        return Point(loc[0] + view.width / 2f, loc[1] + view.height / 2f)
     }
 
     private fun showCrosshair(appContext: Context, center: Point) {
@@ -94,28 +107,44 @@ object OverlayHost {
         wm.addView(view, params)
         crosshair = view
         crosshairParams = params
+        // 布局完成后按屏幕坐标系校正位置（消除窗口坐标原点偏差）
+        view.post { placeCrosshairCenter(wm, center.x, center.y) }
     }
 
-    /** 准星移动到指定中心点，并同步为控制器目标。 */
+    /** 拖动中：准星跟随 + 目标点同步（屏幕绝对坐标）。 */
     private fun relocateTarget(appContext: Context, centerX: Float, centerY: Float) {
-        val params = crosshairParams
-        val view = crosshair
-        if (params != null && view != null) {
-            params.x = (centerX - view.width / 2f).toInt()
-            params.y = (centerY - view.height / 2f).toInt()
-            val wm = appContext.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
-            runCatching { wm?.updateViewLayout(view, params) }
-        }
+        val wm = appContext.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+        if (wm != null) placeCrosshairCenter(wm, centerX, centerY)
         AutomationController.updateConfig { it.copy(target = Point(centerX, centerY)) }
+    }
+
+    /** 将准星中心摆放至屏幕绝对坐标 (cx, cy)，自动换算窗口坐标系偏移。 */
+    private fun placeCrosshairCenter(wm: WindowManager, cx: Float, cy: Float) {
+        val view: CrosshairView = crosshair ?: return
+        val params: WindowManager.LayoutParams = crosshairParams ?: return
+        if (view.width == 0) {
+            view.post { placeCrosshairCenter(wm, cx, cy) }
+            return
+        }
+        val loc = IntArray(2)
+        view.getLocationOnScreen(loc)
+        // 窗口坐标 → 屏幕坐标的固定偏移（通常为状态栏高度，各 ROM 不同）
+        val offsetX = loc[0] - params.x
+        val offsetY = loc[1] - params.y
+        params.x = (cx - offsetX - view.width / 2f).toInt()
+        params.y = (cy - offsetY - view.height / 2f).toInt()
+        runCatching { wm.updateViewLayout(view, params) }
     }
 
     /** 拖动结束后控制球吸附到最近的左右边缘，不再遮挡目标点。 */
     private fun snapBallToEdge(appContext: Context) {
-        val view = ball ?: return
+        val view: View = ball ?: return
         val params = ballParams ?: return
         val wm = appContext.getSystemService(Context.WINDOW_SERVICE) as? WindowManager ?: return
         val screen = wm.maximumWindowMetrics.bounds
-        val centerX = params.x + view.width / 2f
+        val loc = IntArray(2)
+        view.getLocationOnScreen(loc)
+        val centerX = loc[0] + view.width / 2f
         params.x = if (centerX < screen.width() / 2f) 0 else screen.width() - view.width
         params.y = params.y.coerceIn(0, (screen.height() - view.height).coerceAtLeast(0))
         runCatching { wm.updateViewLayout(view, params) }
