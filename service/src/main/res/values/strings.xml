@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chenlu_notification_channel_name">自动化服务</string>
+    <string name="chenlu_notification_channel_desc">尘露任务运行时的常驻通知与控制入口</string>
+    <string name="chenlu_notification_title">尘露 · 服务运行中</string>
+    <string name="chenlu_notification_text">通过悬浮球或应用内控制启停</string>
+    <string name="chenlu_action_toggle">启停</string>
+    <string name="chenlu_action_stop">停止</string>
+</resources>

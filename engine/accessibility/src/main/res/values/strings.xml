@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chenlu_accessibility_label">尘露 · 手势引擎</string>
+    <string name="chenlu_accessibility_description">尘露连点器的无障碍手势引擎：仅用于在你的设备上注入点击、滑动等手势，不读取屏幕内容与个人数据。</string>
+</resources>
