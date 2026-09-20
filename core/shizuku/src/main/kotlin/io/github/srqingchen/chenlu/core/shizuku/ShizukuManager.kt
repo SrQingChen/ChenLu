@@ -116,13 +116,13 @@ object ShizukuManager {
         onBinderAlive()
     }
 
-    /** 经 Shizuku（shell）一键开启无障碍服务；返回 null 表示成功。 */
-    fun enableAccessibilityService(component: String): String? {
+    /** 经 Shizuku（shell）一键开启无障碍服务（含解除受限设置与回读校验）；返回 null 表示成功。 */
+    fun enableAccessibilityService(pkg: String, component: String): String? {
         val injector = injector ?: return "注入服务未连接"
-        return runCatching { injector.enableAccessibilityService(component) }
+        return runCatching { injector.enableAccessibilityService(pkg, component) }
             .getOrElse { it.message }
             ?.also { ChenLuLog.e("shizuku", "一键开启无障碍失败: $it") }
-            ?: ChenLuLog.i("shizuku", "一键开启无障碍成功: $component").let { null }
+            ?: ChenLuLog.i("shizuku", "一键开启无障碍写入成功: $component").let { null }
     }
 
     /** 超级岛兼容模式：临时切断/恢复 xmsf 联网；返回 null 表示成功。 */

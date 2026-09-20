@@ -78,9 +78,10 @@ object AutomationController {
             it.copy(running = true, executedCount = 0L, activeEngineId = engine.id, lastError = null)
         }
         ChenLuLog.i("controller", "任务启动：engine=${engine.id}, config=${_state.value.config}")
+        val startElapsed = android.os.SystemClock.elapsedRealtime()
         appContext?.let {
-            io.github.srqingchen.chenlu.service.island.FocusIslandPublisher.publish(
-                it, running = true, count = 0, config = _state.value.config, engineId = engine.id,
+            io.github.srqingchen.chenlu.service.island.FocusIslandPublisher.publishRunning(
+                it, count = 0, config = _state.value.config, engineId = engine.id, elapsedMs = 0,
             )
         }
         var lastIslandMs = 0L
@@ -125,17 +126,32 @@ object AutomationController {
                         }
                     }
                     delay(config.intervalMs.coerceAtLeast(16L))
+
+                    // 完成条件（总次数 / 总时长）到量自动停止
+                    val elapsed = android.os.SystemClock.elapsedRealtime() - startElapsed
+                    val countNow = _state.value.executedCount
+                    if (config.totalClicks > 0 && countNow >= config.totalClicks) {
+                        ChenLuLog.i("controller", "已达目标次数 $countNow，自动停止")
+                        stop()
+                        return@launch
+                    }
+                    if (config.totalDurationMs > 0 && elapsed >= config.totalDurationMs) {
+                        ChenLuLog.i("controller", "已达目标时长，自动停止")
+                        stop()
+                        return@launch
+                    }
+
                     // 超级岛 1Hz 节流刷新
                     val nowMs = android.os.SystemClock.elapsedRealtime()
                     if (nowMs - lastIslandMs >= 1000L) {
                         lastIslandMs = nowMs
                         appContext?.let { ctx ->
-                            io.github.srqingchen.chenlu.service.island.FocusIslandPublisher.publish(
+                            io.github.srqingchen.chenlu.service.island.FocusIslandPublisher.publishRunning(
                                 ctx,
-                                running = true,
                                 count = _state.value.executedCount,
                                 config = config,
                                 engineId = engine.id,
+                                elapsedMs = elapsed,
                             )
                         }
                     }
@@ -153,6 +169,31 @@ object AutomationController {
         loopJob?.cancel()
         loopJob = null
         _state.update { it.copy(running = false) }
-        appContext?.let { io.github.srqingchen.chenlu.service.island.FocusIslandPublisher.dismiss(it) }
+        appContext?.let { io.github.srqingchen.chenlu.service.island.FocusIslandPublisher.onTaskStopped(it) }
+    }
+
+    /** 面板“间隔±”：步进 25ms。 */
+    fun adjustInterval(deltaMs: Long) {
+        updateConfig { it.copy(intervalMs = (it.intervalMs + deltaMs).coerceIn(16L, 2000L)) }
+        ChenLuLog.i("controller", "间隔调整为 ${_state.value.config.intervalMs}ms")
+    }
+
+    /** 立即刷新岛（面板间隔调整后反馈）。 */
+    fun refreshIsland() {
+        val ctx = appContext ?: return
+        val running = _state.value.running
+        if (running) {
+            io.github.srqingchen.chenlu.service.island.FocusIslandPublisher.publishRunning(
+                ctx,
+                count = _state.value.executedCount,
+                config = _state.value.config,
+                engineId = _state.value.activeEngineId,
+                elapsedMs = 0,
+            )
+        } else if (io.github.srqingchen.chenlu.service.island.FocusIslandPublisher.idleEnabled &&
+            !io.github.srqingchen.chenlu.service.island.FocusIslandPublisher.appForeground
+        ) {
+            io.github.srqingchen.chenlu.service.island.FocusIslandPublisher.publishIdle(ctx)
+        }
     }
 }

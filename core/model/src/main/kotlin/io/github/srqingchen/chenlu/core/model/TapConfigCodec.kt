@@ -10,10 +10,12 @@ import org.json.JSONObject
 object TapConfigCodec {
 
     fun toJson(config: TapConfig): String = JSONObject().apply {
-        put("v", 1)
+        put("v", 2)
         put("intervalMs", config.intervalMs)
         put("pressDurationMs", config.pressDurationMs)
         put("order", config.order.name)
+        put("totalClicks", config.totalClicks)
+        put("totalDurationMs", config.totalDurationMs)
         put("targets", JSONArray().apply {
             config.targets.forEach { p ->
                 put(JSONArray().put(p.x.toDouble()).put(p.y.toDouble()))
@@ -37,6 +39,8 @@ object TapConfigCodec {
             order = runCatching {
                 TargetOrder.valueOf(o.optString("order", TargetOrder.SEQUENTIAL.name))
             }.getOrDefault(TargetOrder.SEQUENTIAL),
+            totalClicks = o.optLong("totalClicks", 0L),
+            totalDurationMs = o.optLong("totalDurationMs", 0L),
         )
     }.getOrNull()
 }

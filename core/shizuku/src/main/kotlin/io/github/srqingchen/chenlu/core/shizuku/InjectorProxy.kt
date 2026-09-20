@@ -64,9 +64,12 @@ class InjectorProxy(private val binder: IBinder) {
     fun xmsfGate(block: Boolean): String? =
         transact2(TRANSACTION_XMSF_GATE) { it.writeInt(if (block) 1 else 0) }
 
-    /** 经 shell 写 secure 设置开启无障碍服务。 */
-    fun enableAccessibilityService(component: String): String? =
-        transact2(TRANSACTION_ENABLE_ACCESSIBILITY) { it.writeString(component) }
+    /** 经 shell 解除受限设置并写 secure 设置开启无障碍服务。 */
+    fun enableAccessibilityService(pkg: String, component: String): String? =
+        transact2(TRANSACTION_ENABLE_ACCESSIBILITY) {
+            it.writeString(pkg)
+            it.writeString(component)
+        }
 
     private fun transact2(code: Int, write: (Parcel) -> Unit): String? {
         val data = Parcel.obtain()

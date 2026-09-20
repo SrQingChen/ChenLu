@@ -82,6 +82,7 @@ import io.github.srqingchen.chenlu.service.AutomationController
 import io.github.srqingchen.chenlu.service.AutomationService
 import io.github.srqingchen.chenlu.service.island.FocusIslandPublisher
 import io.github.srqingchen.chenlu.service.overlay.OverlayHost
+import kotlinx.coroutines.launch
 
 /** 底部分区定义：title 大标题，subtitle 功能分类，tags 页头功能标签。 */
 private enum class AppSection(
@@ -492,7 +493,55 @@ private fun TaskPage(
         )
     }
 
+    FinishConditionCard(config = config)
+
     TaskLibraryCard(onSave = onSaveTask, onLoad = onLoadTask, onDelete = onDeleteTask)
+}
+
+/** 完成条件：总次数 / 总时长（0 = 不限），驱动岛上的真实进度与自动停止。 */
+@Composable
+private fun FinishConditionCard(config: TapConfig) {
+    var clicks by remember(config.totalClicks) {
+        mutableStateOf(if (config.totalClicks > 0) config.totalClicks.toString() else "")
+    }
+    var minutes by remember(config.totalDurationMs) {
+        mutableStateOf(
+            if (config.totalDurationMs > 0) (config.totalDurationMs / 60000).toString() else "",
+        )
+    }
+    GlassCard {
+        Text("完成条件", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Text(
+            "到量自动停止；岛上进度环将显示 次数/总次数 或 时长/总时长。两者留空 = 不限。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedTextField(
+            value = clicks,
+            onValueChange = { clicks = it.filter { c -> c.isDigit() }.take(7) },
+            label = { Text("总次数（可选）") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = minutes,
+            onValueChange = { minutes = it.filter { c -> c.isDigit() }.take(4) },
+            label = { Text("总时长（分钟，可选）") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Button(
+            onClick = {
+                AutomationController.updateConfig {
+                    it.copy(
+                        totalClicks = clicks.toLongOrNull() ?: 0L,
+                        totalDurationMs = (minutes.toLongOrNull() ?: 0L) * 60_000L,
+                    )
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("保存完成条件") }
+    }
 }
 
 @Composable
@@ -632,6 +681,7 @@ private fun EnginePage(
         engines.any { it.id == "accessibility" && it.state.value is EngineState.Unavailable }
     ) {
         val context = LocalContext.current
+        val scope = androidx.compose.runtime.rememberCoroutineScope()
         GlassCard {
             Text(
                 "无障碍入口找不到？",
@@ -640,16 +690,26 @@ private fun EnginePage(
             )
             FilledTonalButton(
                 onClick = {
-                    val component =
-                        "${context.packageName}/io.github.srqingchen.chenlu.engine.accessibility.ChenLuAccessibilityService"
-                    ShizukuManager.enableAccessibilityService(component)
+                    scope.launch {
+                        val component =
+                            "${context.packageName}/io.github.srqingchen.chenlu.engine.accessibility.ChenLuAccessibilityService"
+                        ShizukuManager.enableAccessibilityService(context.packageName, component)
+                        kotlinx.coroutines.delay(3000L)
+                        val ready = EngineRegistry.engines.value.any {
+                            it.id == "accessibility" && it.state.value is EngineState.Ready
+                        }
+                        ChenLuLog.i(
+                            "shizuku",
+                            if (ready) "一键开启后 3 秒验证：无障碍已连接" else "一键开启后 3 秒验证：仍未连接（写入可能被系统回滚，见 readback 日志）",
+                        )
+                    }
                 },
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text("经 Shizuku 一键开启无障碍")
             }
             Text(
-                "无需在系统设置里寻找入口（shell 权限直接写入系统设置）。",
+                "先解除侧载应用的受限设置（appops），再写入系统设置并回读校验；结果见诊断页日志。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -680,11 +740,23 @@ private fun EnginePage(
                 onCheckedChange = { FocusIslandPublisher.compatMode = it },
             )
         }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("常驻待命岛（离开应用显示）", style = MaterialTheme.typography.bodyMedium)
+            Switch(
+                checked = FocusIslandPublisher.idleEnabled,
+                onCheckedChange = { FocusIslandPublisher.idleEnabled = it },
+            )
+        }
         Text(
-            "运行任务时状态卡片将登上系统超级岛（计数/节奏/进度环，可启停）；" +
-                "非白名单应用需开兼容模式：发布期间临时切断小米推送服务联网令鉴权放行" +
-                "（MAA 同款做法），期间全机小米推送可能延迟，任务结束自动恢复。" +
-                "未生效时退化为常驻通知。",
+            "离开应用界面即上岛（待命态，轻点岛上的「开始」随时连点），回到应用自动收起；" +
+                "任务运行时岛显示真实进度（次数/总次数 或 时长/总时长）；" +
+                "在通知栏下拉展开可看到简易控制面板（启停 / 间隔± / 打开应用）。" +
+                "兼容模式说明：岛展示期间临时切断小米推送服务联网令鉴权放行（MAA 同款），" +
+                "期间全机小米推送可能延迟，岛收起即恢复。未生效时退化为常驻通知。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

@@ -10,15 +10,19 @@ data class Point(val x: Float, val y: Float) {
 /** 多目标点击顺序：顺序循环 / 随机（防检测地基）。 */
 enum class TargetOrder { SEQUENTIAL, RANDOM }
 
-/** 连点配置：多点目标 + 节奏 + 顺序。 */
+/** 连点配置：多点目标 + 节奏 + 顺序 + 完成条件（0 = 不限）。 */
 data class TapConfig(
     val targets: List<Point> = emptyList(),
     val intervalMs: Long = DEFAULT_INTERVAL_MS,
     val pressDurationMs: Long = DEFAULT_PRESS_MS,
     val order: TargetOrder = TargetOrder.SEQUENTIAL,
+    val totalClicks: Long = 0L,
+    val totalDurationMs: Long = 0L,
 ) {
     /** 单点便捷访问（向后兼容用）。 */
     val target: Point get() = targets.firstOrNull() ?: Point.ZERO
+
+    fun hasFinishCondition(): Boolean = totalClicks > 0 || totalDurationMs > 0
 
     companion object {
         const val DEFAULT_INTERVAL_MS = 100L

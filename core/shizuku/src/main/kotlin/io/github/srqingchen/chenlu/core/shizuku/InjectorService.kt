@@ -68,8 +68,9 @@ class InjectorService : Binder() {
 
             TRANSACTION_ENABLE_ACCESSIBILITY -> {
                 data.enforceInterface(DESCRIPTOR)
+                val pkg = data.readString().orEmpty()
                 val component = data.readString().orEmpty()
-                val (code, out) = runCatching { enableAccessibility(component) }
+                val (code, out) = runCatching { enableAccessibility(pkg, component) }
                     .getOrElse { -1 to it.message.orEmpty() }
                 reply?.writeNoException()
                 reply?.writeInt(code)
@@ -196,21 +197,33 @@ class InjectorService : Binder() {
         -1 to (t.message ?: t.javaClass.simpleName)
     }
 
-    /** 经 shell 写 secure 设置：合并 enabled_accessibility_services 并开启总开关。 */
-    private fun enableAccessibility(component: String): Pair<Int, String> {
+    /**
+     * 经 shell 开启无障碍：先尝试解除侧载应用的受限设置（Android 13+ 会拒绝绑定
+     * 受限应用的服务），再合并写入并回读校验。
+     */
+    private fun enableAccessibility(pkg: String, component: String): Pair<Int, String> {
         if (component.isBlank()) return -1 to "component 为空"
+        // 解除受限设置（appop；失败不阻断，部分 ROM 无此 appop）
+        val (oc, oo) = execCommand(3, "appops", "set", pkg, "ACCESS_RESTRICTED_SETTINGS", "allow")
         val (gc, current) = execCommand(3, "settings", "get", "secure", "enabled_accessibility_services")
-        if (gc != 0) return gc to "读取失败: $current"
+        if (gc != 0) return gc to "读取失败: $current（appops exit=$oc out=$oo）"
         val existing = current.trim().trim('"').split(':').filter { it.isNotBlank() }
-        if (component in existing) {
-            val (ec, eo) = execCommand(3, "settings", "put", "secure", "accessibility_enabled", "1")
-            return ec to eo
+        if (component !in existing) {
+            val (pc, po) = execCommand(
+                3, "settings", "put", "secure", "enabled_accessibility_services",
+                (existing + component).joinToString(":"),
+            )
+            if (pc != 0) return pc to po
         }
-        val merged = (existing + component).joinToString(":")
-        val (pc, po) = execCommand(3, "settings", "put", "secure", "enabled_accessibility_services", merged)
-        if (pc != 0) return pc to po
         val (ec, eo) = execCommand(3, "settings", "put", "secure", "accessibility_enabled", "1")
-        return ec to eo
+        if (ec != 0) return ec to eo
+        // 回读校验：被系统回滚时报 -2
+        val (rc, rv) = execCommand(3, "settings", "get", "secure", "enabled_accessibility_services")
+        return if (rv.contains(component)) {
+            0 to "readback OK（appops exit=$oc）"
+        } else {
+            -2 to "写入疑似被系统回滚，readback=$rv"
+        }
     }
 
     /** 超级岛兼容模式：临时切断/恢复小米推送服务（xmsf）联网，令云端白名单鉴权 fail-open。 */
@@ -266,7 +279,7 @@ class InjectorService : Binder() {
 
     companion object {
         /** 与 UserServiceArgs.version 联动：不匹配时 Shizuku 自动销毁旧服务进程。 */
-        const val VERSION = 5
+        const val VERSION = 6
 
         const val RESULT_FAIL = 0
         const val RESULT_OK = 1
