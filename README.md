@@ -22,6 +22,16 @@
 | [docs/01-调研报告.md](docs/01-调研报告.md) | Shizuku 机制、澎湃 OS 3 超级岛开放能力、竞品痛点与技术路线、2026 现代架构基线（含来源链接） |
 | [docs/02-开发规划.md](docs/02-开发规划.md) | 技术选型、模块化架构、引擎抽象设计、功能规划、里程碑与风险对策 |
 
+## 快速开始
+
+```bash
+git clone https://github.com/SrQingChen/ChenLu.git
+cd ChenLu && ./gradlew assembleDebug
+# 产物：app/build/outputs/apk/debug/app-debug.apk
+```
+
+使用：安装后开启「无障碍 · 尘露手势引擎」→ 应用内或悬浮球启停连点（M0 为单点连点骨架；Shizuku 引擎、十字准星、图色触发按里程碑推进）。
+
 ## 技术栈速览
 
 Kotlin 2.4.x · Jetpack Compose（BOM 2026.08+，Material 3 / Expressive 预埋）· Hilt · Room · DataStore · kotlinx.serialization · 单 Activity + Navigation · minSdk 26 / targetSdk 36 · Shizuku API 13.1.5
