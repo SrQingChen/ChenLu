@@ -23,6 +23,7 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -50,6 +51,7 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.srqingchen.chenlu.core.common.ChenLuLog
+import io.github.srqingchen.chenlu.core.data.TaskRepository
 import io.github.srqingchen.chenlu.core.model.AutomationRunState
 import io.github.srqingchen.chenlu.core.model.TargetOrder
 import io.github.srqingchen.chenlu.core.shizuku.ShizukuManager
@@ -146,6 +148,27 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                 onPick = { OverlayHost.startTargetPicker(context) },
             )
 
+            SectionHeader("任务库")
+            TaskLibraryCard(
+                currentConfig = runState.config,
+                onSave = { name ->
+                    ChenLuLog.i("tasks", "保存任务: $name")
+                    TaskRepository.save(name, runState.config)
+                },
+                onLoad = { task ->
+                    val loaded = task.config ?: return@TaskLibraryCard
+                    AutomationController.updateConfig { existing ->
+                        // 空目标不覆盖现有目标（预设模板只有节奏参数）
+                        loaded.copy(targets = loaded.targets.ifEmpty { existing.targets })
+                    }
+                    ChenLuLog.i("tasks", "加载任务: ${task.name}")
+                },
+                onDelete = { task ->
+                    TaskRepository.delete(task.id)
+                    ChenLuLog.i("tasks", "删除任务: ${task.name}")
+                },
+            )
+
             SectionHeader("权限与悬浮窗")
             PermissionCard(
                 accessibilityReady = engines.any { it.id == "accessibility" && it.state.value is EngineState.Ready },
@@ -206,6 +229,81 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 16.dp),
             )
+        }
+    }
+}
+
+@Composable
+private fun TaskLibraryCard(
+    currentConfig: io.github.srqingchen.chenlu.core.model.TapConfig,
+    onSave: (String) -> Unit,
+    onLoad: (TaskRepository.SavedTask) -> Unit,
+    onDelete: (TaskRepository.SavedTask) -> Unit,
+) {
+    val context = LocalContext.current
+    val tasks by TaskRepository.tasks.collectAsStateWithLifecycle()
+    var name by remember { mutableStateOf("") }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    placeholder = { Text("任务名称") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                )
+                Button(onClick = {
+                    onSave(name)
+                    name = ""
+                }) { Text("保存") }
+            }
+            if (tasks.isEmpty()) {
+                Text(
+                    "暂无任务。保存当前配置（目标点/节奏/顺序）即可复用。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                tasks.forEach { task ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(task.name, style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                task.config?.let { c ->
+                                    "${c.targets.size} 点 · ${c.intervalMs}ms · " +
+                                        if (c.order == TargetOrder.RANDOM) "随机" else "顺序"
+                                } ?: "配置损坏",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        TextButton(onClick = { onLoad(task) }) { Text("加载") }
+                        TextButton(onClick = {
+                            runCatching {
+                                val intent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(
+                                        Intent.EXTRA_TEXT,
+                                        "// ChenLu task: ${task.name}\n${task.configJson}",
+                                    )
+                                }
+                                context.startActivity(Intent.createChooser(intent, "分享任务"))
+                            }
+                        }) { Text("分享") }
+                        TextButton(onClick = { onDelete(task) }) { Text("删除") }
+                    }
+                }
+            }
         }
     }
 }

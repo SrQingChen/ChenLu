@@ -2,7 +2,9 @@ package io.github.srqingchen.chenlu.core.shizuku
 
 import android.system.Os
 import android.system.OsConstants
+import java.io.File
 import java.io.FileDescriptor
+import java.math.BigInteger
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.TimeUnit
@@ -13,8 +15,11 @@ import java.util.concurrent.TimeUnit
  * 事件自 EventHub/InputReader 层进入完整输入管线——与硬件触屏同源：
  * 系统「显示点按操作」可视化可见、不经 InputManager 注入标记，仿真度最高。
  *
- * shell 用户位于 input 组，对触屏节点有读写权限。节点与量程经 `getevent -i`
- * 文本解析获得（免 ioctl）。任一步失败即报错，由调用方回退 injectInputEvent。
+ * 节点探测三级策略（shell 用户位于 input 组，对触屏节点有读写权限）：
+ * 1. `getevent -il`：兼容 标签名 / '0035' / 0035 三种输出格式；
+ * 2. `getevent -i`：同上；
+ * 3. sysfs 能力位（/sys/class/input/eventN/device/capabilities/abs）兜底，
+ *    量程按屏幕分辨率假定（多数触屏面板 1:1 映射）。
  */
 class KernelTouchInjector {
 
@@ -25,56 +30,112 @@ class KernelTouchInjector {
     private var maxY = 0f
     private var nextTrackingId = 1
 
-    /** 最近一次成功初始化的节点描述（写入诊断）。 */
+    /** 最近一次初始化的节点描述（成功时也写入，便于诊断确认内核链是否生效）。 */
     var statusNote: String = ""
         private set
 
-    private class Axis(val min: Float, val max: Float) {
-        val range: Float get() = max - min
-    }
+    private class DeviceSpec(
+        val path: String,
+        val xMin: Float,
+        val xMax: Float,
+        val yMin: Float,
+        val yMax: Float,
+    )
 
-    /** 探测触屏节点。成功返回 null，失败返回原因。 */
+    /** 探测并打开触屏节点。成功返回 null，失败返回原因。 */
     @Synchronized
     fun init(screenW: Int, screenH: Int): String? {
         if (fd != null) return null
-        val output = runCatching {
-            val process = ProcessBuilder("getevent", "-i").redirectErrorStream(true).start()
-            process.inputStream.readBytes().decodeToString().also {
-                process.waitFor(3, TimeUnit.SECONDS)
-            }
-        }.getOrNull() ?: return "getevent -i 执行失败"
+        var lastError = ""
 
-        var bestPath: String? = null
-        var bestX: Axis? = null
-        var bestY: Axis? = null
-        var bestScore = Float.MAX_VALUE
-
-        for (block in output.split("add device").drop(1)) {
-            val path = Regex("/dev/input/event\\d+").find(block)?.value ?: continue
-            val xm = Regex("'0035':\\s*value\\s*[-\\d]+,\\s*min\\s*(-?[\\d.]+),\\s*max\\s*(-?[\\d.]+)")
-                .find(block) ?: continue
-            val ym = Regex("'0036':\\s*value\\s*[-\\d]+,\\s*min\\s*(-?[\\d.]+),\\s*max\\s*(-?[\\d.]+)")
-                .find(block) ?: continue
-            val x = Axis(xm.groupValues[1].toFloat(), xm.groupValues[2].toFloat())
-            val y = Axis(ym.groupValues[1].toFloat(), ym.groupValues[2].toFloat())
-            // 优先选择量程与屏幕尺寸最接近的设备（排除触控板/副屏）
-            val score = kotlin.math.abs(x.range - screenW) + kotlin.math.abs(y.range - screenH)
-            if (score < bestScore) {
-                bestScore = score
-                bestPath = path
-                bestX = x
-                bestY = y
+        for (args in listOf(arrayOf("getevent", "-il"), arrayOf("getevent", "-i"))) {
+            val output = runCatching {
+                val process = ProcessBuilder(*args).redirectErrorStream(true).start()
+                process.inputStream.readBytes().decodeToString().also {
+                    process.waitFor(3, TimeUnit.SECONDS)
+                }
+            }.getOrNull() ?: continue
+            val spec = parseGetevent(output, screenW, screenH)
+            if (spec != null) {
+                val err = openNode(spec, "getevent 解析")
+                if (err == null) return null
+                lastError = err
+            } else {
+                lastError = "getevent 输出未解析到 ABS_MT_POSITION_X/Y"
             }
         }
-        val path = bestPath ?: return "未解析到带 ABS_MT_POSITION_X/Y 的触屏节点"
-        val target = runCatching { Os.open(path, OsConstants.O_RDWR, 0) }
-            .getOrElse { return "打开 $path 失败: ${it.message}" }
+
+        // sysfs 兜底
+        probeViaSysfs()?.let { path ->
+            val spec = DeviceSpec(
+                path,
+                0f, (screenW - 1).toFloat(),
+                0f, (screenH - 1).toFloat(),
+            )
+            val err = openNode(spec, "sysfs 探测（量程按屏幕假定）")
+            if (err == null) return null
+            lastError = err
+        }
+
+        return lastError.ifEmpty { "getevent 与 sysfs 均未找到触屏节点" }
+    }
+
+    /** 解析 getevent 输出，返回量程与屏幕最接近的触屏设备。 */
+    private fun parseGetevent(output: String, screenW: Int, screenH: Int): DeviceSpec? {
+        var best: DeviceSpec? = null
+        var bestScore = Float.MAX_VALUE
+        for (block in output.split("add device").drop(1)) {
+            val path = Regex("/dev/input/event\\d+").find(block)?.value ?: continue
+            val xm = ABS_X.find(block) ?: continue
+            val ym = ABS_Y.find(block) ?: continue
+            val spec = DeviceSpec(
+                path,
+                xm.groupValues[1].toFloat(), xm.groupValues[2].toFloat(),
+                ym.groupValues[1].toFloat(), ym.groupValues[2].toFloat(),
+            )
+            val score = kotlin.math.abs(spec.xMax - spec.xMin - screenW) +
+                kotlin.math.abs(spec.yMax - spec.yMin - screenH)
+            if (score < bestScore) {
+                bestScore = score
+                best = spec
+            }
+        }
+        return best
+    }
+
+    /** sysfs 能力位探测：找带 ABS_MT_POSITION_X/Y（且优先有 BTN_TOUCH）的事件节点。 */
+    private fun probeViaSysfs(): String? {
+        val dir = File("/sys/class/input")
+        val events = dir.listFiles { f -> f.name.startsWith("event") } ?: return null
+        var fallback: String? = null
+        for (event in events.sortedBy { it.name }) {
+            val absBits = readBitmap(File(event, "capabilities/abs")) ?: continue
+            if (!absBits.testBit(ABS_MT_POSITION_X_CODE) || !absBits.testBit(ABS_MT_POSITION_Y_CODE)) continue
+            val devPath = "/dev/input/${event.name}"
+            val keyBits = readBitmap(File(event, "capabilities/key"))
+            if (keyBits?.testBit(BTN_TOUCH_CODE) == true) return devPath
+            if (fallback == null) fallback = devPath
+        }
+        return fallback
+    }
+
+    private fun readBitmap(file: File): BigInteger? = runCatching {
+        var result = BigInteger.ZERO
+        file.readText().trim().split(Regex("\\s+")).forEachIndexed { i, word ->
+            result = result.or(BigInteger(word, 16).shiftLeft(i * 32))
+        }
+        result
+    }.getOrNull()
+
+    private fun openNode(spec: DeviceSpec, via: String): String? {
+        val target = runCatching { Os.open(spec.path, OsConstants.O_RDWR, 0) }
+            .getOrElse { return "打开 ${spec.path} 失败（$via）: ${it.message}" }
         fd = target
-        minX = bestX!!.min
-        maxX = bestX!!.max
-        minY = bestY!!.min
-        maxY = bestY!!.max
-        statusNote = "$path 量程[x:$minX..$maxX y:$minY..$maxY]"
+        minX = spec.xMin
+        maxX = spec.xMax
+        minY = spec.yMin
+        maxY = spec.yMax
+        statusNote = "$via 命中 ${spec.path}，量程[x:$minX..$maxX y:$minY..$maxY]"
         return null
     }
 
@@ -150,10 +211,22 @@ class KernelTouchInjector {
 
         private const val SYN_REPORT = 0x00
         private const val BTN_TOUCH = 0x14A
+        private const val BTN_TOUCH_CODE = 0x14A
 
         private const val ABS_MT_SLOT = 0x2F
         private const val ABS_MT_POSITION_X = 0x35
         private const val ABS_MT_POSITION_Y = 0x36
         private const val ABS_MT_TRACKING_ID = 0x39
+
+        private const val ABS_MT_POSITION_X_CODE = 0x35
+        private const val ABS_MT_POSITION_Y_CODE = 0x36
+
+        /** 兼容三种 getevent 输出格式：标签名 / '0035' / 0035。 */
+        private val ABS_X = Regex(
+            "(?:ABS_MT_POSITION_X|'?0035'?)\\s*:?\\s*value\\s*(-?\\d+)\\s*,\\s*min\\s*(-?\\d+)\\s*,\\s*max\\s*(-?\\d+)",
+        )
+        private val ABS_Y = Regex(
+            "(?:ABS_MT_POSITION_Y|'?0036'?)\\s*:?\\s*value\\s*(-?\\d+)\\s*,\\s*min\\s*(-?\\d+)\\s*,\\s*max\\s*(-?\\d+)",
+        )
     }
 }

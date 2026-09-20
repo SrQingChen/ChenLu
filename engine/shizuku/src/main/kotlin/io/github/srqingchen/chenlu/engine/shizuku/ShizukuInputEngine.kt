@@ -88,12 +88,13 @@ class ShizukuInputEngine(private val appContext: Context? = null) : InputEngine 
         when (code) {
             InjectorService.RESULT_OK_KERNEL, InjectorService.RESULT_OK -> {
                 if (code != lastMode) {
+                    val reason = runCatching { injector.lastError() }.getOrDefault("")
                     ChenLuLog.i(
                         "shizuku",
                         if (code == InjectorService.RESULT_OK_KERNEL) {
                             "内核级注入已启用（/dev/input 直写，触摸显示可见）"
                         } else {
-                            "注入模式：injectInputEvent（内核直写不可用，触摸显示不可见属正常）"
+                            "注入模式：injectInputEvent。内核直写不可用原因: $reason"
                         },
                     )
                     lastMode = code

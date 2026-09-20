@@ -8,8 +8,8 @@ android {
 
     defaultConfig {
         applicationId = "io.github.srqingchen.chenlu"
-        versionCode = 6
-        versionName = "0.3.1-kernel"
+        versionCode = 7
+        versionName = "0.4.0-tasks"
     }
 
     buildTypes {
@@ -37,6 +37,7 @@ dependencies {
     implementation(project(":engine:accessibility"))
     implementation(project(":engine:shizuku"))
     implementation(project(":core:shizuku"))
+    implementation(project(":core:data"))
     implementation(project(":core:designsystem"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
