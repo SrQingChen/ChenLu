@@ -51,6 +51,7 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.srqingchen.chenlu.core.common.ChenLuLog
 import io.github.srqingchen.chenlu.core.model.AutomationRunState
+import io.github.srqingchen.chenlu.core.model.TargetOrder
 import io.github.srqingchen.chenlu.core.shizuku.ShizukuManager
 import io.github.srqingchen.chenlu.core.shizuku.ShizukuState
 import io.github.srqingchen.chenlu.engine.api.EngineRegistry
@@ -132,12 +133,17 @@ fun HomeScreen(modifier: Modifier = Modifier) {
             SectionHeader("任务参数")
             ParamsCard(
                 runState = runState,
+                overlayGranted = overlayGranted,
                 onIntervalChange = { ms ->
                     AutomationController.updateConfig { it.copy(intervalMs = ms) }
                 },
                 onPressChange = { ms ->
                     AutomationController.updateConfig { it.copy(pressDurationMs = ms) }
                 },
+                onOrderChange = { order ->
+                    AutomationController.updateConfig { it.copy(order = order) }
+                },
+                onPick = { OverlayHost.startTargetPicker(context) },
             )
 
             SectionHeader("权限与悬浮窗")
@@ -382,31 +388,65 @@ private fun ShizukuActionRow(
 @Composable
 private fun ParamsCard(
     runState: AutomationRunState,
+    overlayGranted: Boolean,
     onIntervalChange: (Long) -> Unit,
     onPressChange: (Long) -> Unit,
+    onOrderChange: (TargetOrder) -> Unit,
+    onPick: () -> Unit,
 ) {
+    val config = runState.config
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
-                "目标点：(${runState.config.target.x.toInt()}, ${runState.config.target.y.toInt()})",
+                if (config.targets.isEmpty()) {
+                    "目标点：未设置"
+                } else if (config.targets.size == 1) {
+                    "目标点：1 个（${config.targets[0].x.toInt()}, ${config.targets[0].y.toInt()}）"
+                } else {
+                    "目标点：${config.targets.size} 个（${config.targets.joinToString(limit = 3) { "(${it.x.toInt()},${it.y.toInt()})" }}…）"
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (config.targets.size > 1) {
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    SegmentedButton(
+                        selected = config.order == TargetOrder.SEQUENTIAL,
+                        onClick = { onOrderChange(TargetOrder.SEQUENTIAL) },
+                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                    ) { Text("顺序") }
+                    SegmentedButton(
+                        selected = config.order == TargetOrder.RANDOM,
+                        onClick = { onOrderChange(TargetOrder.RANDOM) },
+                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                    ) { Text("随机") }
+                }
+            }
+            OutlinedButton(onClick = onPick, enabled = overlayGranted, modifier = Modifier.fillMaxWidth()) {
+                Text("屏幕选点（支持多点）")
+            }
+            if (!overlayGranted) {
+                Text(
+                    "选点需要悬浮窗权限，请先在“权限与悬浮窗”区授权",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             Text(
-                "点击间隔：${runState.config.intervalMs} ms",
+                "点击间隔：${config.intervalMs} ms",
                 style = MaterialTheme.typography.bodyMedium,
             )
             Slider(
-                value = runState.config.intervalMs.toFloat(),
+                value = config.intervalMs.toFloat(),
                 onValueChange = { onIntervalChange(it.toLong()) },
                 valueRange = 16f..1000f,
             )
             Text(
-                "按压时长：${runState.config.pressDurationMs} ms",
+                "按压时长：${config.pressDurationMs} ms",
                 style = MaterialTheme.typography.bodyMedium,
             )
             Slider(
-                value = runState.config.pressDurationMs.toFloat(),
+                value = config.pressDurationMs.toFloat(),
                 onValueChange = { onPressChange(it.toLong().coerceAtLeast(20L)) },
                 valueRange = 20f..500f,
             )

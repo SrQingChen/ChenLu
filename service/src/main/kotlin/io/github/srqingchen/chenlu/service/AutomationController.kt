@@ -2,6 +2,7 @@ package io.github.srqingchen.chenlu.service
 
 import io.github.srqingchen.chenlu.core.common.ChenLuLog
 import io.github.srqingchen.chenlu.core.model.AutomationRunState
+import io.github.srqingchen.chenlu.core.model.TargetOrder
 import io.github.srqingchen.chenlu.core.model.TapConfig
 import io.github.srqingchen.chenlu.engine.api.EngineRegistry
 import io.github.srqingchen.chenlu.engine.api.EngineState
@@ -16,10 +17,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlin.random.Random
 
 /**
  * 自动化任务控制器：UI / 悬浮球 / 通知按钮共享的单一事实源。
- * M0 提供单点连点循环；M1 起由 TaskIR 调度器接管（循环/随机抖动/多步骤）。
+ * 支持多目标（顺序/随机循环）；M1 起由 TaskIR 调度器接管（随机抖动/多步骤）。
  */
 object AutomationController {
 
@@ -71,6 +73,7 @@ object AutomationController {
         ChenLuLog.i("controller", "任务启动：engine=${engine.id}, config=${_state.value.config}")
         loopJob = scope.launch {
             var consecutiveFailures = 0
+            var seqIndex = 0
             try {
                 while (isActive) {
                     val live = engine.state.value
@@ -80,7 +83,20 @@ object AutomationController {
                         return@launch
                     }
                     val config = _state.value.config
-                    val ok = engine.tap(config.target, TapSpec(durationMs = config.pressDurationMs))
+                    val targets = config.targets
+                    if (targets.isEmpty()) {
+                        _state.update {
+                            it.copy(running = false, lastError = "未设置目标点：拖动悬浮球或使用屏幕选点")
+                        }
+                        ChenLuLog.e("controller", "目标点为空，任务停止")
+                        return@launch
+                    }
+                    val point = when {
+                        targets.size == 1 -> targets[0]
+                        config.order == TargetOrder.RANDOM -> targets[Random.nextInt(targets.size)]
+                        else -> targets[seqIndex++ % targets.size]
+                    }
+                    val ok = engine.tap(point, TapSpec(durationMs = config.pressDurationMs))
                     if (ok) {
                         consecutiveFailures = 0
                         _state.update { it.copy(executedCount = it.executedCount + 1L, lastError = null) }
@@ -107,6 +123,7 @@ object AutomationController {
     }
 
     fun stop() {
+        ChenLuLog.i("controller", "任务停止（已执行 ${_state.value.executedCount} 次）")
         loopJob?.cancel()
         loopJob = null
         _state.update { it.copy(running = false) }

@@ -1,18 +1,25 @@
 package io.github.srqingchen.chenlu.core.model
 
-/** 屏幕坐标（物理像素）。 */
+/** 屏幕坐标（物理像素，屏幕绝对坐标系，含状态栏区域）。 */
 data class Point(val x: Float, val y: Float) {
     companion object {
         val ZERO = Point(0f, 0f)
     }
 }
 
-/** M0 单点连点配置；M1 起扩展为完整 TaskIR。 */
+/** 多目标点击顺序：顺序循环 / 随机（防检测地基）。 */
+enum class TargetOrder { SEQUENTIAL, RANDOM }
+
+/** 连点配置：多点目标 + 节奏 + 顺序。 */
 data class TapConfig(
-    val target: Point = Point.ZERO,
+    val targets: List<Point> = emptyList(),
     val intervalMs: Long = DEFAULT_INTERVAL_MS,
     val pressDurationMs: Long = DEFAULT_PRESS_MS,
+    val order: TargetOrder = TargetOrder.SEQUENTIAL,
 ) {
+    /** 单点便捷访问（向后兼容用）。 */
+    val target: Point get() = targets.firstOrNull() ?: Point.ZERO
+
     companion object {
         const val DEFAULT_INTERVAL_MS = 100L
         const val DEFAULT_PRESS_MS = 48L

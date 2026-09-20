@@ -53,13 +53,13 @@ class AutomationService : LifecycleService() {
         super.onDestroy()
     }
 
-    /** 未设置目标点时默认取屏幕中心（M2 起由十字准星指定）。 */
+    /** 未设置目标点时默认取屏幕中心（多目标经屏幕选点设置）。 */
     private fun ensureDefaultTarget() {
-        if (AutomationController.state.value.config.target != Point.ZERO) return
+        if (AutomationController.state.value.config.targets.isNotEmpty()) return
         val wm = getSystemService(WindowManager::class.java) ?: return
         val bounds = wm.maximumWindowMetrics.bounds
         AutomationController.updateConfig {
-            it.copy(target = Point(bounds.width() / 2f, bounds.height() / 2f))
+            it.copy(targets = listOf(Point(bounds.width() / 2f, bounds.height() / 2f)))
         }
     }
 

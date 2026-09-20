@@ -7,10 +7,13 @@ import android.graphics.Paint
 import android.view.View
 
 /**
- * 十字准星：仅作为点击目标的可视化标记。
+ * 十字准星：仅作为点击目标的可视化标记（多点模式下显示序号）。
  * 所在窗口使用 FLAG_NOT_TOUCHABLE（触摸穿透），注入的点击事件不会命中本控件。
  */
 class CrosshairView(context: Context) : View(context) {
+
+    /** 多点模式下显示的序号（从 1 开始），单点为 null。 */
+    var label: String? = null
 
     private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.argb(200, 0, 137, 123) // ChenLuAccent
@@ -22,6 +25,14 @@ class CrosshairView(context: Context) : View(context) {
         style = Paint.Style.STROKE
         strokeWidth = 2.5f
         strokeCap = Paint.Cap.ROUND
+    }
+    private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textSize = 28f
+        isFakeBoldText = true
+    }
+    private val labelBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.argb(200, 0, 105, 92) // DewPrimaryLight
     }
     private val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.argb(28, 0, 0, 0)
@@ -42,5 +53,14 @@ class CrosshairView(context: Context) : View(context) {
         canvas.drawLine(cx + gap, cy, cx + reach, cy, crossPaint)
         canvas.drawLine(cx, cy - reach, cx, cy - gap, crossPaint)
         canvas.drawLine(cx, cy + gap, cx, cy + reach, crossPaint)
+        label?.let {
+            val textWidth = labelPaint.measureText(it)
+            val bx = cx + width * 0.18f
+            val by = cy - width * 0.42f
+            canvas.drawRoundRect(
+                bx, by, bx + textWidth + 16f, by + 40f, 20f, 20f, labelBgPaint,
+            )
+            canvas.drawText(it, bx + 8f, by + 30f, labelPaint)
+        }
     }
 }
