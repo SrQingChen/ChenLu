@@ -82,6 +82,7 @@ object AutomationController {
         appContext?.let {
             io.github.srqingchen.chenlu.service.island.FocusIslandPublisher.publishRunning(
                 it, count = 0, config = _state.value.config, engineId = engine.id, elapsedMs = 0,
+                taskName = _state.value.taskName,
             )
         }
         var lastIslandMs = 0L
@@ -168,6 +169,8 @@ object AutomationController {
                                 config = config,
                                 engineId = engine.id,
                                 elapsedMs = elapsed,
+                                taskName = _state.value.taskName,
+                                error = _state.value.lastError,
                             )
                         }
                     }
@@ -205,6 +208,8 @@ object AutomationController {
                 config = _state.value.config,
                 engineId = _state.value.activeEngineId,
                 elapsedMs = 0,
+                taskName = _state.value.taskName,
+                error = _state.value.lastError,
             )
         } else if (io.github.srqingchen.chenlu.service.island.FocusIslandPublisher.idleEnabled &&
             !io.github.srqingchen.chenlu.service.island.FocusIslandPublisher.appForeground
@@ -212,4 +217,34 @@ object AutomationController {
             io.github.srqingchen.chenlu.service.island.FocusIslandPublisher.publishIdle(ctx)
         }
     }
+
+    /** 记录当前任务名（保存/加载/换任务时设置，岛与 UI 展示用）。 */
+    fun updateTaskName(name: String?) {
+        _state.update { it.copy(taskName = name) }
+    }
+
+    /** 岛上「换任务」：在任务库中循环切换（step 通常为 ±1）。 */
+    fun switchTask(step: Int) {
+        val tasks = io.github.srqingchen.chenlu.core.data.TaskRepository.tasks.value
+        if (tasks.isEmpty()) {
+            ChenLuLog.w("controller", "任务库为空，无法切换")
+            return
+        }
+        taskCursor = ((taskCursor + step) % tasks.size + tasks.size) % tasks.size
+        val task = tasks[taskCursor]
+        val loaded = task.config
+        if (loaded == null) {
+            ChenLuLog.e("controller", "任务配置损坏: ${task.name}")
+            return
+        }
+        updateConfig { existing ->
+            loaded.copy(targets = loaded.targets.ifEmpty { existing.targets })
+        }
+        updateTaskName(task.name)
+        ChenLuLog.i("controller", "切换任务: ${task.name}")
+        refreshIsland()
+    }
+
+    @Volatile
+    private var taskCursor = 0
 }

@@ -206,12 +206,14 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                         onSaveTask = { name ->
                             ChenLuLog.i("tasks", "保存任务: $name")
                             TaskRepository.save(name, runState.config)
+                            AutomationController.updateTaskName(name.ifBlank { null })
                         },
                         onLoadTask = { task ->
                             val loaded = task.config ?: return@TaskPage
                             AutomationController.updateConfig { existing ->
                                 loaded.copy(targets = loaded.targets.ifEmpty { existing.targets })
                             }
+                            AutomationController.updateTaskName(task.name)
                             ChenLuLog.i("tasks", "加载任务: ${task.name}")
                         },
                         onDeleteTask = { task ->

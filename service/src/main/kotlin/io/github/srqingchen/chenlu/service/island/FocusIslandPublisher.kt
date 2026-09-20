@@ -43,6 +43,7 @@ object FocusIslandPublisher {
     private const val CHANNEL_ID = "chenlu_island"
     private const val NOTIF_ID = 2001
     private const val ACCENT = "#00897B"
+    private const val ACCENT_ERROR = "#FF5252"
     private const val ACCENT_UNREACH = "#33FFFFFF"
 
     /** 任务状态上岛开关。 */
@@ -66,8 +67,13 @@ object FocusIslandPublisher {
 
     private val gateExecutor = Executors.newSingleThreadExecutor()
 
+    /** 网关“意图”状态：true = 需要保持断网。立即更新，任务队列按代数校验。 */
     @Volatile
-    private var gateActive = false
+    private var gateWanted = false
+
+    /** 意图代数：睡醒的恢复任务若已过时则放弃执行。 */
+    @Volatile
+    private var gateGeneration = 0L
 
     @Volatile
     private var channelReady = false
@@ -114,6 +120,7 @@ object FocusIslandPublisher {
                 progress = 0,
                 progressText = "轻点「开始」随时连点",
                 actionsRunning = false,
+                error = null,
             ),
         )
     }
@@ -124,6 +131,8 @@ object FocusIslandPublisher {
         config: TapConfig,
         engineId: String?,
         elapsedMs: Long,
+        taskName: String? = null,
+        error: String? = null,
     ) {
         if (!enabled) return
         val appContext = context.applicationContext
@@ -135,10 +144,11 @@ object FocusIslandPublisher {
             buildNotification(
                 appContext,
                 title = "尘露 · 运行中",
-                content = runningSummary(config, engineId),
+                content = (taskName?.let { "$it · " } ?: "") + runningSummary(config, engineId),
                 progress = progressOf(count, config, elapsedMs),
                 progressText = progressText(count, config, elapsedMs),
                 actionsRunning = true,
+                error = error,
             ),
         )
     }
@@ -150,13 +160,15 @@ object FocusIslandPublisher {
         releaseGate(appContext)
     }
 
-    /** 服务启动时调用：仅当本进程内存态认为未断网（进程刚重建）时，清理上次遗留的断网状态。 */
+    /** 服务启动时调用：仅当本进程内存态认为无需断网（进程刚重建）时，清理上次遗留的断网状态。 */
     fun restoreGateIfNeeded(context: Context) {
-        // 同进程内 gateActive 是权威状态：岛正在展示（断网生效中）时绝不能“恢复”
-        if (gateActive) return
+        // 同进程内 gateWanted 是权威状态：岛正在展示（断网生效中）时绝不能“恢复”
+        if (gateWanted) return
         val flag = gateFlagFile(context)
         if (flag.exists()) {
+            val gen = ++gateGeneration
             gateExecutor.execute {
+                if (gen != gateGeneration) return@execute
                 val err = ShizukuManager.xmsfGate(false)
                 if (err == null) {
                     flag.delete()
@@ -205,28 +217,34 @@ object FocusIslandPublisher {
     // ---------- 兼容模式网关 ----------
 
     private fun engageGateIfNeeded(context: Context) {
-        if (!compatMode || gateActive) return
+        if (!compatMode || gateWanted) return
         if (ShizukuManager.injector == null) return
+        gateWanted = true
+        val gen = ++gateGeneration
         gateExecutor.execute {
+            if (gen != gateGeneration) return@execute
             val err = ShizukuManager.xmsfGate(true)
             if (err == null) {
-                gateActive = true
                 runCatching { gateFlagFile(context).writeText("blocked") }
                 ChenLuLog.i("island", "兼容模式：已临时切断 xmsf 联网（岛鉴权 fail-open）")
             } else {
+                gateWanted = false
                 ChenLuLog.w("island", "兼容模式切断 xmsf 失败（岛可能不上岛，退化为通知）: $err")
             }
         }
     }
 
     private fun releaseGate(context: Context) {
-        if (!gateActive) return
+        if (!gateWanted) return
+        // 意图立即置为“恢复”，但实际恢复延迟执行；
+        // 若期间又需要断网（代数变化），睡醒的恢复任务会自取消，网关无缝保持
+        gateWanted = false
+        val gen = ++gateGeneration
         gateExecutor.execute {
-            // 延迟恢复，确保岛已收起
             runCatching { Thread.sleep(1500) }
+            if (gen != gateGeneration) return@execute
             val err = ShizukuManager.xmsfGate(false)
             if (err == null) {
-                gateActive = false
                 runCatching { gateFlagFile(context).delete() }
                 ChenLuLog.i("island", "兼容模式：xmsf 联网已恢复")
             } else {
@@ -260,11 +278,15 @@ object FocusIslandPublisher {
         progress: Int,
         progressText: String,
         actionsRunning: Boolean,
+        error: String?,
     ): android.app.Notification {
+        val showError = !error.isNullOrBlank()
+        val displayContent = if (showError) "$content · ⚠ $error" else "$content · $progressText"
+        val accent = if (showError) ACCENT_ERROR else ACCENT
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_chenlu)
             .setContentTitle(title)
-            .setContentText("$content · $progressText")
+            .setContentText(displayContent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setCategory(android.app.Notification.CATEGORY_PROGRESS)
@@ -273,15 +295,21 @@ object FocusIslandPublisher {
                 if (actionsRunning) "暂停" else "开始",
                 actionIntent(context, AutomationService.ACTION_TOGGLE),
             )
+            .addAction(0, "换任务", actionIntent(context, AutomationService.ACTION_TASK_NEXT))
             .addAction(0, "停止", actionIntent(context, AutomationService.ACTION_STOP))
             .setContentIntent(launchIntent(context))
 
         // 通知栏下拉展开 = 简易控制面板
-        builder.setCustomBigContentView(buildPanel(context, title, content, progressText, actionsRunning))
+        builder.setCustomBigContentView(
+            buildPanel(context, title, displayContent, progressText, actionsRunning),
+        )
 
         val icon = simpleIcon(context)
         val extras = Bundle().apply {
-            putString("miui.focus.param", buildFocusJson(title, content, progressText, progress))
+            putString(
+                "miui.focus.param",
+                buildFocusJson(title, displayContent, progressText, progress, showError),
+            )
             putBundle(
                 "miui.focus.pics",
                 Bundle().apply {
@@ -311,13 +339,15 @@ object FocusIslandPublisher {
         setOnClickPendingIntent(R.id.panel_open, launchIntent(context))
     }
 
-    /** V3 焦点岛参数（business 复用官方 download_progress 模板，进度环真实进度）。 */
+    /** V3 焦点岛参数（business 复用官方 download_progress 模板，进度环真实进度，错误态红色）。 */
     private fun buildFocusJson(
         title: String,
         content: String,
         progressText: String,
         progress: Int,
+        error: Boolean,
     ): String {
+        val accent = if (error) ACCENT_ERROR else ACCENT
         val root = JSONObject().put(
             "param_v2",
             JSONObject()
@@ -332,11 +362,13 @@ object FocusIslandPublisher {
                 .put("islandProperty", 1)
                 .put("islandTimeout", 86400)
                 .put("dismissIsland", false)
+                // 直接以胶囊形态出现（MAA 做法），不先展示展开态
+                .put("islandFirstFloat", false)
                 .put(
                     "chatInfo",
-                    JSONObject().put("title", title).put("content", "$content · $progressText"),
+                    JSONObject().put("title", title).put("content", content),
                 )
-                .put("multiProgressInfo", JSONObject().put("progress", progress).put("color", ACCENT))
+                .put("multiProgressInfo", JSONObject().put("progress", progress).put("color", accent))
                 .put(
                     "bigIslandArea",
                     JSONObject().put(
@@ -351,7 +383,7 @@ object FocusIslandPublisher {
                                 "textInfo",
                                 JSONObject()
                                     .put("title", title)
-                                    .put("content", "$content · $progressText")
+                                    .put("content", content)
                                     .put("showHighlightColor", true),
                             ),
                     ),
@@ -369,7 +401,7 @@ object FocusIslandPublisher {
                                 "progressInfo",
                                 JSONObject()
                                     .put("progress", progress)
-                                    .put("colorReach", ACCENT)
+                                    .put("colorReach", accent)
                                     .put("colorUnReach", ACCENT_UNREACH)
                                     .put("isCCW", true),
                             ),

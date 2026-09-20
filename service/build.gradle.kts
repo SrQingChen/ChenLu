@@ -11,6 +11,7 @@ dependencies {
     api(project(":engine:api"))
     implementation(project(":core:common"))
     implementation(project(":core:shizuku"))
+    implementation(project(":core:data"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.service)

@@ -8,8 +8,8 @@ android {
 
     defaultConfig {
         applicationId = "io.github.srqingchen.chenlu"
-        versionCode = 11
-        versionName = "0.7.1-jitter"
+        versionCode = 12
+        versionName = "0.8.0-island-plus"
     }
 
     buildTypes {

@@ -38,5 +38,6 @@ data class AutomationRunState(
     val config: TapConfig = TapConfig(),
     val executedCount: Long = 0L,
     val activeEngineId: String? = null,
+    val taskName: String? = null,
     val lastError: String? = null,
 )

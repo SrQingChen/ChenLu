@@ -52,6 +52,9 @@ class AutomationService : LifecycleService() {
                 AutomationController.adjustInterval(+25L)
                 AutomationController.refreshIsland()
             }
+            ACTION_TASK_NEXT -> {
+                AutomationController.switchTask(+1)
+            }
         }
         return START_STICKY
     }
@@ -128,6 +131,7 @@ class AutomationService : LifecycleService() {
         const val ACTION_STOP = "io.github.srqingchen.chenlu.action.STOP"
         const val ACTION_INTERVAL_MINUS = "io.github.srqingchen.chenlu.action.INTERVAL_MINUS"
         const val ACTION_INTERVAL_PLUS = "io.github.srqingchen.chenlu.action.INTERVAL_PLUS"
+        const val ACTION_TASK_NEXT = "io.github.srqingchen.chenlu.action.TASK_NEXT"
 
         /** 确保 FGS 存活并转发控制动作（服务未启动时先启动）。 */
         fun toggle(context: Context) = dispatch(context, ACTION_TOGGLE)
