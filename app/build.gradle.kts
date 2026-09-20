@@ -8,8 +8,8 @@ android {
 
     defaultConfig {
         applicationId = "io.github.srqingchen.chenlu"
-        versionCode = 2
-        versionName = "0.2.0-diag"
+        versionCode = 3
+        versionName = "0.2.1-crosshair"
     }
 
     buildTypes {

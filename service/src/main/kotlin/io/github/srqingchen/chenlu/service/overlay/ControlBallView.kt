@@ -11,12 +11,18 @@ import android.view.WindowManager
 import kotlin.math.abs
 
 /**
- * 悬浮控制球：拖动移动位置，单击启停任务。
+ * 悬浮控制球：拖动 = 移动点击目标（准星跟手）；松手后吸附屏幕边缘；单击启停任务。
  * 纯 View 自绘（不依赖 Compose），保证轻量与低延迟。
  */
 class ControlBallView(context: Context) : View(context) {
 
     var onToggle: (() -> Unit)? = null
+
+    /** 拖动中回调（球心的屏幕物理坐标，Gravity TOP|START 体系）。 */
+    var onCenterChanged: ((centerX: Float, centerY: Float) -> Unit)? = null
+
+    /** 抬手回调（dragged = 本次触摸是否为拖动；单击时为 false，由 performClick 处理）。 */
+    var onReleased: ((dragged: Boolean) -> Unit)? = null
 
     private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ACCENT }
     private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -67,6 +73,7 @@ class ControlBallView(context: Context) : View(context) {
                 return true
             }
             MotionEvent.ACTION_UP -> {
+                onReleased?.invoke(dragged)
                 if (!dragged) performClick()
                 return true
             }
@@ -86,6 +93,7 @@ class ControlBallView(context: Context) : View(context) {
         lp.y += dy.toInt()
         (context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager)
             ?.updateViewLayout(this, lp)
+        onCenterChanged?.invoke(lp.x + width / 2f, lp.y + height / 2f)
     }
 
     companion object {

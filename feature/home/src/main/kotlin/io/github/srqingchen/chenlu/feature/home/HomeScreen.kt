@@ -388,6 +388,11 @@ private fun ParamsCard(
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
+                "目标点：(${runState.config.target.x.toInt()}, ${runState.config.target.y.toInt()})",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
                 "点击间隔：${runState.config.intervalMs} ms",
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -441,10 +446,15 @@ private fun PermissionCard(
                 onAction = onNotifSettings,
             )
             PermissionRow(
-                label = if (ballShown) "控制球：已显示" else "控制球：已隐藏",
+                label = if (ballShown) "控制球与准星：已显示" else "控制球与准星：已隐藏",
                 granted = null,
                 actionText = if (ballShown) "隐藏" else "显示",
                 onAction = onToggleBall,
+            )
+            Text(
+                "拖动控制球即可定位：准星实时跟手，松手后球吸附屏幕边缘，准星停留处即点击位置；单击球启停。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
