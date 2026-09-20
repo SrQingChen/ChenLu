@@ -25,8 +25,8 @@ class InjectorProxy(private val binder: IBinder) {
         }
     }
 
-    /** @return InjectorService.RESULT_OK / RESULT_FALLBACK_CMD / RESULT_FAIL。 */
-    fun injectTap(x: Float, y: Float, durationMs: Long): Int {
+    /** @return InjectorService.RESULT_OK_KERNEL / RESULT_OK / RESULT_FALLBACK_CMD / RESULT_FAIL。 */
+    fun injectTap(x: Float, y: Float, durationMs: Long, screenW: Int, screenH: Int): Int {
         val data = Parcel.obtain()
         val reply = Parcel.obtain()
         return try {
@@ -35,6 +35,8 @@ class InjectorProxy(private val binder: IBinder) {
             data.writeFloat(y)
             data.writeLong(0L) // downTimeMs 占位
             data.writeLong(durationMs)
+            data.writeInt(screenW)
+            data.writeInt(screenH)
             binder.transact(TRANSACTION_INJECT_TAP, data, reply, 0)
             reply.readException()
             reply.readInt()

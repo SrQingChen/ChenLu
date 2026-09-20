@@ -12,6 +12,6 @@ class ChenLuApp : Application() {
         // 组装根：注册双引擎并开始监听 Shizuku。M1 引入 Hilt 后由 DI 容器接管。
         ShizukuManager.start(this)
         EngineRegistry.register(AccessibilityInputEngine())
-        EngineRegistry.register(ShizukuInputEngine())
+        EngineRegistry.register(ShizukuInputEngine(this))
     }
 }

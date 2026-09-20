@@ -9,6 +9,9 @@ import io.github.srqingchen.chenlu.engine.api.EngineCapabilities
 import io.github.srqingchen.chenlu.engine.api.EngineState
 import io.github.srqingchen.chenlu.engine.api.InputEngine
 import io.github.srqingchen.chenlu.engine.api.TapSpec
+import android.content.Context
+import android.graphics.Rect
+import android.view.WindowManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -20,18 +23,31 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.withContext
 
 /**
- * Shizuku 引擎（引擎B）：UserService + InputManager.injectInputEvent（失败自动降级 input tap）。
- * shell 级注入、零进程创建开销；理论数百 Hz（真机基准待标定）。
+ * Shizuku 引擎（引擎B）：三级注入链（内核 /dev/input 直写 → injectInputEvent → input tap）。
+ * 内核级事件走完整输入管线（「显示点按操作」可见），仿真度与反检测最优。
  */
-class ShizukuInputEngine : InputEngine {
+class ShizukuInputEngine(private val appContext: Context? = null) : InputEngine {
 
     override val id: String = ENGINE_ID
 
     override val capabilities: EngineCapabilities = EngineCapabilities(
         maxTapHzApprox = 200,
         supportsMultiTouch = true,
-        note = "shell 级 injectInputEvent，不注册无障碍；实测频率待真机标定",
+        note = "shell 级三级注入（内核直写优先），实测频率待真机标定",
     )
+
+    /** 屏幕物理尺寸（内核级坐标映射用），应用进程侧计算。 */
+    private val screenBounds: Rect? by lazy {
+        appContext?.let { ctx ->
+            runCatching {
+                ctx.getSystemService(WindowManager::class.java)?.maximumWindowMetrics?.bounds
+            }.getOrNull()
+        }
+    }
+
+    /** 注入模式日志去重：仅在切换时记录一条。 */
+    @Volatile
+    private var lastMode = 0
 
     override val state: StateFlow<EngineState> =
         ShizukuManager.state
@@ -60,13 +76,30 @@ class ShizukuInputEngine : InputEngine {
             return@withContext false
         }
         val code = runCatching {
-            injector.injectTap(point.x, point.y, spec.durationMs)
+            val bounds = screenBounds
+            injector.injectTap(
+                point.x, point.y, spec.durationMs,
+                bounds?.width() ?: 0, bounds?.height() ?: 0,
+            )
         }.getOrElse { t ->
             ChenLuLog.e("shizuku", "Binder 调用异常: ${t.javaClass.simpleName}: ${t.message}")
             -1
         }
         when (code) {
-            InjectorService.RESULT_OK -> true
+            InjectorService.RESULT_OK_KERNEL, InjectorService.RESULT_OK -> {
+                if (code != lastMode) {
+                    ChenLuLog.i(
+                        "shizuku",
+                        if (code == InjectorService.RESULT_OK_KERNEL) {
+                            "内核级注入已启用（/dev/input 直写，触摸显示可见）"
+                        } else {
+                            "注入模式：injectInputEvent（内核直写不可用，触摸显示不可见属正常）"
+                        },
+                    )
+                    lastMode = code
+                }
+                true
+            }
             InjectorService.RESULT_FALLBACK_CMD -> {
                 ChenLuLog.w(
                     "shizuku",

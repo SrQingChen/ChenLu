@@ -195,7 +195,7 @@ object OverlayHost {
         runCatching { wm.updateViewLayout(view, entry.params) }
     }
 
-    /** 拖动结束后控制球吸附最近边缘；与任一准星重合时上下让位。 */
+    /** 拖动结束后控制球吸附最近边缘；与任一准星重合时改吸附屏幕另一侧。 */
     private fun snapBallToEdge(appContext: Context) {
         val view: View = ball ?: return
         val params = ballParams ?: return
@@ -205,37 +205,52 @@ object OverlayHost {
         view.getLocationOnScreen(loc)
         val ballW = view.width
         val ballH = view.height
+        val screenW = screen.width()
+        val screenH = screen.height()
+        val maxTop = (screenH - ballH).coerceAtLeast(0)
 
-        // 水平吸附
-        val centerX = loc[0] + ballW / 2f
-        val newLeft = if (centerX < screen.width() / 2f) 0 else screen.width() - ballW
-        var newTop = params.y.coerceIn(0, (screen.height() - ballH).coerceAtLeast(0))
+        val nearLeft = (loc[0] + ballW / 2f) < screenW / 2f
+        var newLeft = if (nearLeft) 0 else screenW - ballW
+        var newTop = params.y.coerceIn(0, maxTop)
 
-        // 与准星的重合规避：圆近似（准星半径 + 余量）
-        val margin = 24f
-        val density = appContext.resources.displayMetrics.density
-        val crosshairRadius = density * 44 * 0.6f
-        val ballRadius = ballW / 2f
-        for (entry in crosshairEntries) {
-            val ballCenterY = newTop + ballH / 2f
-            val ballCenterX = newLeft + ballW / 2f
-            val dx = ballCenterX - entry.centerX
-            val dy = ballCenterY - entry.centerY
-            val minDist = ballRadius + crosshairRadius + margin
-            if (dx * dx + dy * dy < minDist * minDist) {
-                // 向远离准星的方向垂直让位；目标在屏幕上半 → 球往下走，反之往上
-                newTop = if (entry.centerY < screen.height() / 2f) {
-                    (entry.centerY + crosshairRadius + margin + ballH).toInt()
-                } else {
-                    (entry.centerY - crosshairRadius - margin - ballH).toInt()
-                }
-                newTop = newTop.coerceIn(0, (screen.height() - ballH).coerceAtLeast(0))
-                break
+        // 与准星重合 → 吸附屏幕另一侧
+        overlapEntry(newLeft, newTop, ballW, ballH)?.let {
+            newLeft = if (nearLeft) screenW - ballW else 0
+        }
+
+        // 极端情况：两侧都重合（左右边缘都有目标）→ 垂直让位兜底
+        overlapEntry(newLeft, newTop, ballW, ballH)?.let { entry ->
+            val density = appContext.resources.displayMetrics.density
+            val crosshairRadius = density * 44 * 0.6f
+            val margin = 24f
+            newTop = if (entry.centerY < screenH / 2f) {
+                (entry.centerY + crosshairRadius + margin + ballH).toInt()
+            } else {
+                (entry.centerY - crosshairRadius - margin - ballH).toInt()
             }
+            newTop = newTop.coerceIn(0, maxTop)
         }
 
         params.x = newLeft
         params.y = newTop
         runCatching { wm.updateViewLayout(view, params) }
+    }
+
+    /** 返回与球矩形（圆近似）重合的第一个准星，无重合返回 null。 */
+    private fun overlapEntry(left: Int, top: Int, ballW: Int, ballH: Int): CrosshairEntry? {
+        if (crosshairEntries.isEmpty()) return null
+        val density = 1f // 半径计算仅用相对尺寸，密度不影响判重结论
+        val ballRadius = ballW / 2f
+        val margin = 24f
+        val centerXB = left + ballW / 2f
+        val centerYB = top + ballH / 2f
+        for (entry in crosshairEntries) {
+            val entryRadius = entry.view.width * 0.6f
+            val minDist = ballRadius + entryRadius + margin
+            val dx = centerXB - entry.centerX
+            val dy = centerYB - entry.centerY
+            if (dx * dx + dy * dy < minDist * minDist) return entry
+        }
+        return null
     }
 }

@@ -41,7 +41,9 @@ class InjectorService : Binder() {
                 val y = data.readFloat()
                 data.readLong() // downTimeMs：节奏由调用方节流，此处忽略
                 val durationMs = data.readLong()
-                val result = runCatching { injectTap(x, y, durationMs) }
+                val screenW = data.readInt()
+                val screenH = data.readInt()
+                val result = runCatching { injectTap(x, y, screenW, screenH, durationMs) }
                     .getOrElse { RESULT_FAIL }
                 reply?.writeNoException()
                 reply?.writeInt(result)
@@ -66,10 +68,26 @@ class InjectorService : Binder() {
         return super.onTransact(code, data, reply, flags)
     }
 
-    /** @return RESULT_OK / RESULT_FALLBACK_CMD / RESULT_FAIL，失败详情见 lastError。 */
+    private val kernelInjector = KernelTouchInjector()
+
+    /**
+     * 三级注入链：内核级（/dev/input 直写，最仿真）→ injectInputEvent → input tap。
+     * @return RESULT_OK_KERNEL / RESULT_OK / RESULT_FALLBACK_CMD / RESULT_FAIL，失败详情见 lastError。
+     */
     @SuppressLint("PrivateApi")
-    private fun injectTap(x: Float, y: Float, durationMs: Long): Int {
+    private fun injectTap(x: Float, y: Float, screenW: Int, screenH: Int, durationMs: Long): Int {
         lastError = ""
+
+        // 一级：内核直写（事件走完整输入管线，「显示点按操作」可见）
+        val kernelError = runCatching {
+            kernelInjector.tap(x, y, screenW, screenH, durationMs.coerceIn(1L, 500L))
+        }.getOrElse { "内核注入异常: ${it.message}" }
+        if (kernelError == null) return RESULT_OK_KERNEL
+        if (lastError.isEmpty()) {
+            lastError = "内核级注入不可用（$kernelError），已回退 injectInputEvent"
+        }
+
+        // 二级：InputManager.injectInputEvent
         val im = inputManager
         if (im == null || injectMethod == null) {
             lastError = buildString {
@@ -195,11 +213,12 @@ class InjectorService : Binder() {
 
     companion object {
         /** 与 UserServiceArgs.version 联动：不匹配时 Shizuku 自动销毁旧服务进程。 */
-        const val VERSION = 3
+        const val VERSION = 4
 
         const val RESULT_FAIL = 0
         const val RESULT_OK = 1
         const val RESULT_FALLBACK_CMD = 2
+        const val RESULT_OK_KERNEL = 3
 
         /** Shizuku 约定的保留事务码：server 卸载服务时调用。 */
         const val TRANSACTION_DESTROY = 16777114
