@@ -129,7 +129,15 @@ class KernelTouchInjector {
 
     private fun openNode(spec: DeviceSpec, via: String): String? {
         val target = runCatching { Os.open(spec.path, OsConstants.O_RDWR, 0) }
-            .getOrElse { return "打开 ${spec.path} 失败（$via）: ${it.message}" }
+            .getOrElse { t ->
+                val msg = "打开 ${spec.path} 失败（$via）: ${t.message}"
+                return if (msg.contains("EACCES")) {
+                    "$msg。系统拒绝 shell 写入输入设备（澎湃等 ROM 的 SELinux 防护，" +
+                        "sendevent 亦被禁）——内核链在此设备不可用，已回退 injectInputEvent"
+                } else {
+                    msg
+                }
+            }
         fd = target
         minX = spec.xMin
         maxX = spec.xMax
