@@ -3,7 +3,9 @@ package io.github.srqingchen.chenlu.service
 import io.github.srqingchen.chenlu.core.model.AutomationRunState
 import io.github.srqingchen.chenlu.core.model.TapConfig
 import io.github.srqingchen.chenlu.engine.api.EngineRegistry
+import io.github.srqingchen.chenlu.engine.api.EngineState
 import io.github.srqingchen.chenlu.engine.api.TapSpec
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -19,6 +21,8 @@ import kotlinx.coroutines.launch
  * M0 提供单点连点循环；M1 起由 TaskIR 调度器接管（循环/随机抖动/多步骤）。
  */
 object AutomationController {
+
+    private const val FAILURE_THRESHOLD = 3
 
     private val _state = MutableStateFlow(AutomationRunState())
     val state: StateFlow<AutomationRunState> = _state.asStateFlow()
@@ -44,23 +48,53 @@ object AutomationController {
     fun start() {
         if (loopJob?.isActive == true) return
         val scope = serviceScope
-        val engine = EngineRegistry.active()
-        if (scope == null || engine == null) {
-            _state.update {
-                it.copy(lastError = if (scope == null) "服务未就绪" else "无可用引擎（请开启无障碍）")
-            }
+        if (scope == null) {
+            _state.update { it.copy(lastError = "服务未就绪，请稍后重试") }
             return
         }
-        _state.update { it.copy(running = true, executedCount = 0L, lastError = null) }
+        val engine = EngineRegistry.activeEngine()
+        if (engine == null) {
+            _state.update { it.copy(lastError = "无可用引擎：请开启无障碍服务或启动 Shizuku") }
+            return
+        }
+        when (val s = engine.state.value) {
+            is EngineState.Unavailable -> {
+                _state.update { it.copy(lastError = "引擎不可用（${engine.id}）：${s.reason}") }
+                return
+            }
+            EngineState.Initializing, EngineState.Ready -> Unit
+        }
+        _state.update {
+            it.copy(running = true, executedCount = 0L, activeEngineId = engine.id, lastError = null)
+        }
         loopJob = scope.launch {
-            while (isActive) {
-                val config = _state.value.config
-                val ok = engine.tap(config.target, TapSpec(durationMs = config.pressDurationMs))
-                _state.update { s ->
-                    if (ok) s.copy(executedCount = s.executedCount + 1L)
-                    else s.copy(lastError = "点击注入失败")
+            var consecutiveFailures = 0
+            try {
+                while (isActive) {
+                    val live = engine.state.value
+                    if (live is EngineState.Unavailable) {
+                        _state.update { it.copy(running = false, lastError = "引擎掉线：${live.reason}") }
+                        return@launch
+                    }
+                    val config = _state.value.config
+                    val ok = engine.tap(config.target, TapSpec(durationMs = config.pressDurationMs))
+                    if (ok) {
+                        consecutiveFailures = 0
+                        _state.update { it.copy(executedCount = it.executedCount + 1L, lastError = null) }
+                    } else {
+                        consecutiveFailures++
+                        if (consecutiveFailures >= FAILURE_THRESHOLD) {
+                            _state.update {
+                                it.copy(lastError = "点击注入连续失败 ${consecutiveFailures} 次，请检查引擎状态")
+                            }
+                        }
+                    }
+                    delay(config.intervalMs.coerceAtLeast(16L))
                 }
-                delay(config.intervalMs.coerceAtLeast(16L))
+            } catch (_: CancellationException) {
+                // stop() 触发，正常退出
+            } finally {
+                _state.update { it.copy(running = false) }
             }
         }
     }

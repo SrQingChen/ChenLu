@@ -18,9 +18,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -32,11 +37,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.srqingchen.chenlu.core.model.AutomationRunState
+import io.github.srqingchen.chenlu.core.shizuku.ShizukuManager
+import io.github.srqingchen.chenlu.core.shizuku.ShizukuState
+import io.github.srqingchen.chenlu.engine.api.EngineRegistry
 import io.github.srqingchen.chenlu.engine.api.EngineState
 import io.github.srqingchen.chenlu.engine.api.InputEngine
 import io.github.srqingchen.chenlu.service.AutomationController
@@ -48,30 +59,38 @@ import io.github.srqingchen.chenlu.service.overlay.OverlayHost
 fun HomeScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val runState by AutomationController.state.collectAsStateWithLifecycle()
-    val engines by remember { io.github.srqingchen.chenlu.engine.api.EngineRegistry.engines }
-        .collectAsStateWithLifecycle()
-    val engine = engines.firstOrNull()
+    val engines by EngineRegistry.engines.collectAsStateWithLifecycle()
+    val preference by EngineRegistry.preference.collectAsStateWithLifecycle()
+    val shizukuState by ShizukuManager.state.collectAsStateWithLifecycle()
 
     var overlayGranted by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
+    var notifGranted by remember {
+        mutableStateOf(NotificationManagerCompat.from(context).areNotificationsEnabled())
+    }
     var ballShown by remember { mutableStateOf(OverlayHost.isBallShown) }
 
     val notifPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
-    ) { }
+    ) { notifGranted = NotificationManagerCompat.from(context).areNotificationsEnabled() }
 
     LaunchedEffect(Unit) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            !NotificationManagerCompat.from(context).areNotificationsEnabled()
+        ) {
             notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 
     LifecycleResumeEffect(Unit) {
         overlayGranted = Settings.canDrawOverlays(context)
+        notifGranted = NotificationManagerCompat.from(context).areNotificationsEnabled()
         onPauseOrDispose { }
     }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("尘露") }) },
+        topBar = {
+            TopAppBar(title = { Text("尘露") })
+        },
         modifier = modifier.fillMaxSize(),
     ) { padding ->
         Column(
@@ -83,27 +102,59 @@ fun HomeScreen(modifier: Modifier = Modifier) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                "如尘随行，如露精准",
+                "如尘随行 · 如露精准",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            EngineCard(engine)
-            RunCard(
+
+            HeroCard(
                 runState = runState,
                 onToggle = { AutomationService.toggle(context) },
+            )
+
+            SectionHeader("引擎")
+            EngineSection(
+                engines = engines,
+                preference = preference,
+                shizukuState = shizukuState,
+                onSelectPreference = EngineRegistry::setPreference,
+                onRequestShizukuPermission = { ShizukuManager.requestPermission() },
+                onOpenShizuku = { ShizukuManager.openShizukuApp(context) },
+                onRetryShizuku = { ShizukuManager.rebind() },
+            )
+
+            SectionHeader("任务参数")
+            ParamsCard(
+                runState = runState,
                 onIntervalChange = { ms ->
                     AutomationController.updateConfig { it.copy(intervalMs = ms) }
                 },
+                onPressChange = { ms ->
+                    AutomationController.updateConfig { it.copy(pressDurationMs = ms) }
+                },
             )
-            OverlayCard(
-                granted = overlayGranted,
+
+            SectionHeader("权限与悬浮窗")
+            PermissionCard(
+                accessibilityReady = engines.any { it.id == "accessibility" && it.state.value is EngineState.Ready },
+                overlayGranted = overlayGranted,
+                notifGranted = notifGranted,
                 ballShown = ballShown,
-                onRequestPermission = {
+                onAccessibilitySettings = {
+                    context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                },
+                onOverlaySettings = {
                     context.startActivity(
                         Intent(
                             Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                             Uri.parse("package:${context.packageName}"),
                         ),
+                    )
+                },
+                onNotifSettings = {
+                    context.startActivity(
+                        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                            .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName),
                     )
                 },
                 onToggleBall = {
@@ -116,60 +167,204 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                     }
                 },
             )
-            OutlinedButton(
-                onClick = { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("打开无障碍设置（启用手势引擎）")
-            }
-        }
-    }
-}
 
-@Composable
-private fun EngineCard(engine: InputEngine?) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("输入引擎", style = MaterialTheme.typography.titleMedium)
-            if (engine == null) {
-                Text("未注册引擎", color = MaterialTheme.colorScheme.error)
-                return@Column
-            }
-            val stateText = when (val s = engine.state.collectAsStateWithLifecycle().value) {
-                EngineState.Initializing -> "初始化…"
-                EngineState.Ready -> "就绪"
-                is EngineState.Unavailable -> s.reason
-            }
-            val ready = engine.state.collectAsStateWithLifecycle().value is EngineState.Ready
+            SectionHeader("Shizuku 激活指引")
+            ShizukuGuideCard()
+
+            HorizontalDivider(Modifier.padding(top = 4.dp))
             Text(
-                text = "${engine.id} · $stateText",
-                color = if (ready) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.error,
-            )
-            Text(
-                engine.capabilities.note,
+                "尘露是免费开源软件（GPL-3.0）· github.com/SrQingChen/ChenLu",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 16.dp),
             )
         }
     }
 }
 
 @Composable
-private fun RunCard(
-    runState: AutomationRunState,
-    onToggle: () -> Unit,
-    onIntervalChange: (Long) -> Unit,
+private fun SectionHeader(title: String) {
+    Text(
+        title,
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(top = 8.dp),
+    )
+}
+
+@Composable
+private fun HeroCard(runState: AutomationRunState, onToggle: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    if (runState.running) "运行中" else "已停止",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (runState.running) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                )
+                Text(
+                    "引擎：${engineLabel(runState.activeEngineId)}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text("已执行 ${runState.executedCount} 次 · 间隔 ${runState.config.intervalMs} ms")
+            runState.lastError?.let {
+                Text(
+                    it,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            Button(onClick = onToggle, modifier = Modifier.fillMaxWidth()) {
+                Text(if (runState.running) "停止" else "开始连点")
+            }
+        }
+    }
+}
+
+@Composable
+private fun EngineSection(
+    engines: List<InputEngine>,
+    preference: String?,
+    shizukuState: ShizukuState,
+    onSelectPreference: (String?) -> Unit,
+    onRequestShizukuPermission: () -> Unit,
+    onOpenShizuku: () -> Unit,
+    onRetryShizuku: () -> Unit,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("连点任务", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "状态：${if (runState.running) "运行中" else "已停止"} · 已执行 ${runState.executedCount} 次",
-            )
-            runState.lastError?.let {
-                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                SegmentedButton(
+                    selected = preference == null,
+                    onClick = { onSelectPreference(null) },
+                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 3),
+                ) { Text("自动") }
+                SegmentedButton(
+                    selected = preference == "accessibility",
+                    onClick = { onSelectPreference("accessibility") },
+                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 3),
+                ) { Text("无障碍") }
+                SegmentedButton(
+                    selected = preference == "shizuku",
+                    onClick = { onSelectPreference("shizuku") },
+                    shape = SegmentedButtonDefaults.itemShape(index = 2, count = 3),
+                ) { Text("Shizuku") }
             }
+
+            engines.forEach { engine ->
+                EngineStatusLine(engine)
+            }
+
+            ShizukuActionRow(
+                state = shizukuState,
+                onRequestPermission = onRequestShizukuPermission,
+                onOpenShizuku = onOpenShizuku,
+                onRetry = onRetryShizuku,
+            )
+        }
+    }
+}
+
+@Composable
+private fun EngineStatusLine(engine: InputEngine) {
+    val state by engine.state.collectAsStateWithLifecycle()
+    val (stateText, color) = when (val s = state) {
+        EngineState.Initializing -> "连接中" to MaterialTheme.colorScheme.onSurfaceVariant
+        EngineState.Ready -> "就绪" to MaterialTheme.colorScheme.primary
+        is EngineState.Unavailable -> s.reason to MaterialTheme.colorScheme.error
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(engineLabel(engine.id), style = MaterialTheme.typography.bodyMedium)
+        Text(
+            stateText,
+            style = MaterialTheme.typography.bodyMedium,
+            color = color,
+        )
+    }
+}
+
+@Composable
+private fun ShizukuActionRow(
+    state: ShizukuState,
+    onRequestPermission: () -> Unit,
+    onOpenShizuku: () -> Unit,
+    onRetry: () -> Unit,
+) {
+    when (state) {
+        ShizukuState.NotInstalled -> Text(
+            "未检测到 Shizuku。安装并激活后可获得更快、更不易被检测的点击引擎；无障碍引擎无需它即可使用。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        ShizukuState.NotRunning -> Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Shizuku 未运行", style = MaterialTheme.typography.bodyMedium)
+            FilledTonalButton(onClick = onOpenShizuku) { Text("打开 Shizuku") }
+        }
+
+        ShizukuState.AwaitingPermission -> Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("等待授权", style = MaterialTheme.typography.bodyMedium)
+            FilledTonalButton(onClick = onRequestPermission) { Text("授权") }
+        }
+
+        ShizukuState.Connecting -> Text(
+            "正在连接注入服务…",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        is ShizukuState.Ready -> Text(
+            "Shizuku 已连接（shell 权限，uid=${state.uid}）",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+
+        is ShizukuState.Failed -> Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Shizuku：${state.reason}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+            OutlinedButton(onClick = onRetry) { Text("重试") }
+        }
+    }
+}
+
+@Composable
+private fun ParamsCard(
+    runState: AutomationRunState,
+    onIntervalChange: (Long) -> Unit,
+    onPressChange: (Long) -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
                 "点击间隔：${runState.config.intervalMs} ms",
                 style = MaterialTheme.typography.bodyMedium,
@@ -179,40 +374,117 @@ private fun RunCard(
                 onValueChange = { onIntervalChange(it.toLong()) },
                 valueRange = 16f..1000f,
             )
-            Button(onClick = onToggle, modifier = Modifier.fillMaxWidth()) {
-                Text(if (runState.running) "停止" else "开始连点")
-            }
+            Text(
+                "按压时长：${runState.config.pressDurationMs} ms",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Slider(
+                value = runState.config.pressDurationMs.toFloat(),
+                onValueChange = { onPressChange(it.toLong().coerceAtLeast(20L)) },
+                valueRange = 20f..500f,
+            )
         }
     }
 }
 
 @Composable
-private fun OverlayCard(
-    granted: Boolean,
+private fun PermissionCard(
+    accessibilityReady: Boolean,
+    overlayGranted: Boolean,
+    notifGranted: Boolean,
     ballShown: Boolean,
-    onRequestPermission: () -> Unit,
+    onAccessibilitySettings: () -> Unit,
+    onOverlaySettings: () -> Unit,
+    onNotifSettings: () -> Unit,
     onToggleBall: () -> Unit,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("悬浮窗", style = MaterialTheme.typography.titleMedium)
-            if (!granted) {
-                Text("未授予悬浮窗权限", color = MaterialTheme.colorScheme.error)
-                OutlinedButton(onClick = onRequestPermission, modifier = Modifier.fillMaxWidth()) {
-                    Text("去授予悬浮窗权限")
-                }
-            } else {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(if (ballShown) "控制球已显示" else "控制球已隐藏")
-                    OutlinedButton(onClick = onToggleBall) {
-                        Text(if (ballShown) "隐藏" else "显示控制球")
-                    }
-                }
-            }
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            PermissionRow(
+                label = "无障碍（手势引擎）",
+                granted = accessibilityReady,
+                actionText = "去设置",
+                onAction = onAccessibilitySettings,
+            )
+            PermissionRow(
+                label = "悬浮窗",
+                granted = overlayGranted,
+                actionText = "去授权",
+                onAction = onOverlaySettings,
+            )
+            PermissionRow(
+                label = "通知",
+                granted = notifGranted,
+                actionText = "去开启",
+                onAction = onNotifSettings,
+            )
+            PermissionRow(
+                label = if (ballShown) "控制球：已显示" else "控制球：已隐藏",
+                granted = null,
+                actionText = if (ballShown) "隐藏" else "显示",
+                onAction = onToggleBall,
+            )
         }
     }
+}
+
+@Composable
+private fun PermissionRow(
+    label: String,
+    granted: Boolean?,
+    actionText: String,
+    onAction: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                when (granted) {
+                    true -> "✓"
+                    false -> "!"
+                    null -> "·"
+                },
+                color = when (granted) {
+                    true -> MaterialTheme.colorScheme.primary
+                    false -> MaterialTheme.colorScheme.error
+                    null -> Color.Unspecified
+                },
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(end = 8.dp),
+            )
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+        }
+        TextButtonLike(actionText, enabled = granted != true, onClick = onAction)
+    }
+}
+
+@Composable
+private fun TextButtonLike(text: String, enabled: Boolean = true, onClick: () -> Unit) {
+    OutlinedButton(onClick = onClick, enabled = enabled) { Text(text) }
+}
+
+@Composable
+private fun ShizukuGuideCard() {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            "1. 安装 Shizuku（moe.shizuku.privileged.api）；\n" +
+                "2. 开发者选项 → 无线调试 → 使用配对码配对（仅首次）；\n" +
+                "3. 在 Shizuku 内点击「启动」；\n" +
+                "4. 回到尘露点击「授权」。\n" +
+                "注：设备重启后需重新启动 Shizuku；小米设备请同时开启「USB 调试（安全设置）」。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(16.dp),
+        )
+    }
+}
+
+internal fun engineLabel(id: String?): String = when (id) {
+    "accessibility" -> "无障碍"
+    "shizuku" -> "Shizuku"
+    null -> "—"
+    else -> id
 }

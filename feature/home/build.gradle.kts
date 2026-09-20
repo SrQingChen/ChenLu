@@ -10,6 +10,7 @@ android {
 dependencies {
     implementation(project(":core:designsystem"))
     implementation(project(":core:model"))
+    implementation(project(":core:shizuku"))
     implementation(project(":engine:api"))
     implementation(project(":service"))
     implementation(libs.androidx.core.ktx)

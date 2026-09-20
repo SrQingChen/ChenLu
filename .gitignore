@@ -10,3 +10,6 @@
 .cxx
 *.apk.idsig
 .kotlin/
+
+# 构建日志
+build_log.txt

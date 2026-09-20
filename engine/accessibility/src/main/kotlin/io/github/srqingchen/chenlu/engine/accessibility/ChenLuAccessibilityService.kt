@@ -55,7 +55,8 @@ class ChenLuAccessibilityService : AccessibilityService() {
             val service = instance ?: return false
             val path = Path().apply {
                 moveTo(x, y)
-                lineTo(x, y)
+                // 微小位移避免零长度 stroke 在部分设备上被立即取消
+                lineTo(x, y + 0.1f)
             }
             val stroke = GestureDescription.StrokeDescription(
                 path,

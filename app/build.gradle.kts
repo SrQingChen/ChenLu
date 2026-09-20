@@ -25,14 +25,21 @@ android {
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
+
+    compileOptions {
+        isCoreLibraryDesugaringEnabled = true
+    }
 }
 
 dependencies {
     implementation(project(":feature:home"))
     implementation(project(":service"))
     implementation(project(":engine:accessibility"))
+    implementation(project(":engine:shizuku"))
+    implementation(project(":core:shizuku"))
     implementation(project(":core:designsystem"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
+    coreLibraryDesugaring(libs.desugar.jdk.libs)
 }
