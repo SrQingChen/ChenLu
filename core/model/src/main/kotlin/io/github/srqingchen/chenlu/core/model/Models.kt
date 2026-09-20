@@ -10,7 +10,7 @@ data class Point(val x: Float, val y: Float) {
 /** 多目标点击顺序：顺序循环 / 随机（防检测地基）。 */
 enum class TargetOrder { SEQUENTIAL, RANDOM }
 
-/** 连点配置：多点目标 + 节奏 + 顺序 + 完成条件（0 = 不限）+ 防检测抖动（0 = 关）。 */
+/** 连点配置：多点目标 + 节奏 + 顺序 + 完成条件（0 = 不限）+ 滑动模式 + 防检测抖动（0 = 关）。 */
 data class TapConfig(
     val targets: List<Point> = emptyList(),
     val intervalMs: Long = DEFAULT_INTERVAL_MS,
@@ -20,11 +20,17 @@ data class TapConfig(
     val totalDurationMs: Long = 0L,
     val jitterPx: Int = 0,
     val jitterMs: Long = 0L,
+    val jitterPressMs: Long = 0L,
+    val swipeDx: Float = 0f,
+    val swipeDy: Float = 0f,
+    val swipeDurationMs: Long = 0L,
 ) {
     /** 单点便捷访问（向后兼容用）。 */
     val target: Point get() = targets.firstOrNull() ?: Point.ZERO
 
     fun hasFinishCondition(): Boolean = totalClicks > 0 || totalDurationMs > 0
+
+    fun swipeEnabled(): Boolean = swipeDurationMs > 0L
 
     companion object {
         const val DEFAULT_INTERVAL_MS = 100L

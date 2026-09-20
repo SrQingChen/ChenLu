@@ -61,6 +61,15 @@ object OverlayHost {
         wm.addView(view, params)
         ball = view
         ballParams = params
+        // 运行态变色 + 点击脉冲（控制器轻量回调）
+        AutomationController.runningListener = { running -> view.running = running }
+        AutomationController.clickListener = { p ->
+            crosshairEntries.forEach { entry ->
+                val dx = p.x - entry.centerX
+                val dy = p.y - entry.centerY
+                if (dx * dx + dy * dy < 160_000f) entry.view.pulse() // 400px 内视为命中
+            }
+        }
 
         // 首帧布局完成后初始化准星：已有目标用目标，否则以球心为准并写回配置
         view.post {
@@ -80,6 +89,8 @@ object OverlayHost {
     fun hideBall(context: Context) {
         val wm = context.applicationContext
             .getSystemService(Context.WINDOW_SERVICE) as? WindowManager ?: return
+        AutomationController.runningListener = null
+        AutomationController.clickListener = null
         ball?.let { runCatching { wm.removeView(it) } }
         clearCrosshairs(wm)
         removePicker(context)

@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.os.SystemClock
 import android.view.View
 
 /**
@@ -38,6 +39,19 @@ class CrosshairView(context: Context) : View(context) {
         color = Color.argb(28, 0, 0, 0)
     }
 
+    private val pulsePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 3f
+    }
+
+    private var pulseStart = 0L
+
+    /** 命中点击时触发扩散脉冲动画（约 350ms）。 */
+    fun pulse() {
+        pulseStart = SystemClock.uptimeMillis()
+        postInvalidateOnAnimation()
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val cx = width / 2f
@@ -61,6 +75,16 @@ class CrosshairView(context: Context) : View(context) {
                 bx, by, bx + textWidth + 16f, by + 40f, 20f, 20f, labelBgPaint,
             )
             canvas.drawText(it, bx + 8f, by + 30f, labelPaint)
+        }
+
+        // 点击脉冲（扩散圆环）
+        val since = SystemClock.uptimeMillis() - pulseStart
+        if (since in 0..350) {
+            val t = since / 350f
+            pulsePaint.color = Color.argb(((1 - t) * 200).toInt(), 0, 137, 123)
+            pulsePaint.strokeWidth = 3f * (1 - t) + 1f
+            canvas.drawCircle(cx, cy, radius + t * width * 0.55f, pulsePaint)
+            postInvalidateOnAnimation()
         }
     }
 }

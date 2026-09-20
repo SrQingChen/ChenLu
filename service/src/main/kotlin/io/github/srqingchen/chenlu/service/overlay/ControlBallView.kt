@@ -18,6 +18,13 @@ class ControlBallView(context: Context) : View(context) {
 
     var onToggle: (() -> Unit)? = null
 
+    /** 任务运行态（红色标识）。 */
+    var running: Boolean = false
+        set(value) {
+            field = value
+            invalidate()
+        }
+
     /** 拖动中回调（球心的屏幕物理坐标，Gravity TOP|START 体系）。 */
     var onCenterChanged: ((centerX: Float, centerY: Float) -> Unit)? = null
 
@@ -46,6 +53,7 @@ class ControlBallView(context: Context) : View(context) {
         super.onDraw(canvas)
         val cx = width / 2f
         val cy = height / 2f
+        fillPaint.color = if (running) RUNNING_COLOR else ACCENT
         canvas.drawCircle(cx, cy, cx * 0.82f, fillPaint)
         canvas.drawCircle(cx, cy, cx * 0.95f, ringPaint)
         val r = cx * 0.38f
@@ -101,5 +109,6 @@ class ControlBallView(context: Context) : View(context) {
 
     companion object {
         private const val ACCENT = 0xFF00897B.toInt()
+        private const val RUNNING_COLOR = 0xFFE53935.toInt()
     }
 }

@@ -60,6 +60,36 @@ class InjectorProxy(private val binder: IBinder) {
         }
     }
 
+    /** 直线滑动注入。 */
+    fun injectSwipe(
+        fromX: Float,
+        fromY: Float,
+        toX: Float,
+        toY: Float,
+        durationMs: Long,
+        screenW: Int,
+        screenH: Int,
+    ): Int {
+        val data = Parcel.obtain()
+        val reply = Parcel.obtain()
+        return try {
+            data.writeInterfaceToken(DESCRIPTOR)
+            data.writeFloat(fromX)
+            data.writeFloat(fromY)
+            data.writeFloat(toX)
+            data.writeFloat(toY)
+            data.writeLong(durationMs)
+            data.writeInt(screenW)
+            data.writeInt(screenH)
+            binder.transact(TRANSACTION_INJECT_SWIPE, data, reply, 0)
+            reply.readException()
+            reply.readInt()
+        } finally {
+            reply.recycle()
+            data.recycle()
+        }
+    }
+
     /** 超级岛兼容模式：block=true 切断 xmsf 联网（云端鉴权 fail-open），false 恢复。 */
     fun xmsfGate(block: Boolean): String? =
         transact2(TRANSACTION_XMSF_GATE) { it.writeInt(if (block) 1 else 0) }
@@ -108,6 +138,7 @@ class InjectorProxy(private val binder: IBinder) {
         private const val TRANSACTION_LAST_ERROR = IBinder.FIRST_CALL_TRANSACTION + 2
         private const val TRANSACTION_XMSF_GATE = IBinder.FIRST_CALL_TRANSACTION + 3
         private const val TRANSACTION_ENABLE_ACCESSIBILITY = IBinder.FIRST_CALL_TRANSACTION + 4
+        private const val TRANSACTION_INJECT_SWIPE = IBinder.FIRST_CALL_TRANSACTION + 5
         private const val TRANSACTION_DESTROY = 16777114
     }
 }

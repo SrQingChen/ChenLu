@@ -56,6 +56,22 @@ class InjectorService : Binder() {
                 return true
             }
 
+            TRANSACTION_INJECT_SWIPE -> {
+                data.enforceInterface(DESCRIPTOR)
+                val fromX = data.readFloat()
+                val fromY = data.readFloat()
+                val toX = data.readFloat()
+                val toY = data.readFloat()
+                val durationMs = data.readLong()
+                val screenW = data.readInt()
+                val screenH = data.readInt()
+                val result = runCatching { injectSwipe(fromX, fromY, toX, toY, screenW, screenH, durationMs) }
+                    .getOrElse { RESULT_FAIL }
+                reply?.writeNoException()
+                reply?.writeInt(result)
+                return true
+            }
+
             TRANSACTION_XMSF_GATE -> {
                 data.enforceInterface(DESCRIPTOR)
                 val block = data.readInt() != 0
@@ -188,6 +204,106 @@ class InjectorService : Binder() {
         RESULT_FAIL
     }
 
+    /**
+     * 直线滑动：injectInputEvent 逐点插值注入（约 16ms 步进）；
+     * 失败回退 `input swipe` 命令。
+     */
+    @SuppressLint("PrivateApi")
+    private fun injectSwipe(
+        fromX: Float,
+        fromY: Float,
+        toX: Float,
+        toY: Float,
+        screenW: Int,
+        screenH: Int,
+        durationMs: Long,
+    ): Int {
+        lastError = ""
+        val duration = durationMs.coerceIn(50L, 3_000L)
+        val im = inputManager
+        if (im != null && injectMethod != null) {
+            val downTime = SystemClock.uptimeMillis()
+            val steps = (duration / 16L).coerceIn(2L, 120L).toInt()
+            val okDown = runCatching {
+                invokeInject(im, motion(fromX, fromY, MotionEvent.ACTION_DOWN, downTime, downTime))
+            }.getOrDefault(false)
+            if (okDown) {
+                val stepMs = duration / steps
+                var allOk = true
+                for (i in 1 until steps) {
+                    if (stepMs >= 8L) SystemClock.sleep(stepMs)
+                    val t = i.toFloat() / steps
+                    val ok = runCatching {
+                        invokeInject(
+                            im,
+                            motion(
+                                fromX + (toX - fromX) * t,
+                                fromY + (toY - fromY) * t,
+                                MotionEvent.ACTION_MOVE,
+                                downTime,
+                                SystemClock.uptimeMillis(),
+                            ),
+                        )
+                    }.getOrDefault(false)
+                    if (!ok) {
+                        allOk = false
+                        lastError = "injectInputEvent(MOVE) 失败于步 $i"
+                        break
+                    }
+                }
+                if (allOk) {
+                    val okUp = runCatching {
+                        invokeInject(im, motion(toX, toY, MotionEvent.ACTION_UP, downTime, SystemClock.uptimeMillis()))
+                    }.getOrDefault(false)
+                    if (okUp) return RESULT_OK
+                    lastError = "injectInputEvent(UP) 失败"
+                }
+            } else if (lastError.isEmpty()) {
+                lastError = "injectInputEvent(DOWN) 失败"
+            }
+        } else {
+            lastError = "反射不可用"
+        }
+        return fallbackInputSwipe(fromX, fromY, toX, toY, duration)
+    }
+
+    private fun motion(x: Float, y: Float, action: Int, downTime: Long, eventTime: Long): MotionEvent =
+        MotionEvent.obtain(
+            downTime, eventTime, action, x, y,
+            PRESSURE, SIZE, 0, 1f, 1f, 0, 0,
+        ).apply { source = InputDevice.SOURCE_TOUCHSCREEN }
+
+    /** 兜底：设备内直接执行 input swipe。 */
+    private fun fallbackInputSwipe(
+        fromX: Float,
+        fromY: Float,
+        toX: Float,
+        toY: Float,
+        durationMs: Long,
+    ): Int = try {
+        val process = ProcessBuilder(
+            "input", "swipe",
+            fromX.toInt().toString(), fromY.toInt().toString(),
+            toX.toInt().toString(), toY.toInt().toString(),
+            durationMs.toInt().toString(),
+        ).redirectErrorStream(true).start()
+        val output = process.inputStream.readBytes().decodeToString().trim()
+        val finished = process.waitFor(5, TimeUnit.SECONDS)
+        if (finished && process.exitValue() == 0) {
+            if (lastError.isNotEmpty()) lastError += " | "
+            lastError += "已降级 input swipe"
+            RESULT_FALLBACK_CMD
+        } else {
+            if (lastError.isNotEmpty()) lastError += " | "
+            lastError += "input swipe 失败: out=$output"
+            RESULT_FAIL
+        }
+    } catch (t: Throwable) {
+        if (lastError.isNotEmpty()) lastError += " | "
+        lastError += "input swipe 异常: ${t.message}"
+        RESULT_FAIL
+    }
+
     private fun execCommand(timeoutSec: Long = 3, vararg cmd: String): Pair<Int, String> = try {
         val process = ProcessBuilder(*cmd).redirectErrorStream(true).start()
         val output = process.inputStream.readBytes().decodeToString().trim()
@@ -279,7 +395,7 @@ class InjectorService : Binder() {
 
     companion object {
         /** 与 UserServiceArgs.version 联动：不匹配时 Shizuku 自动销毁旧服务进程。 */
-        const val VERSION = 6
+        const val VERSION = 7
 
         const val RESULT_FAIL = 0
         const val RESULT_OK = 1
@@ -295,6 +411,7 @@ class InjectorService : Binder() {
         private const val TRANSACTION_LAST_ERROR = IBinder.FIRST_CALL_TRANSACTION + 2
         private const val TRANSACTION_XMSF_GATE = IBinder.FIRST_CALL_TRANSACTION + 3
         private const val TRANSACTION_ENABLE_ACCESSIBILITY = IBinder.FIRST_CALL_TRANSACTION + 4
+        private const val TRANSACTION_INJECT_SWIPE = IBinder.FIRST_CALL_TRANSACTION + 5
 
         private const val PRESSURE = 1f
         private const val SIZE = 1f

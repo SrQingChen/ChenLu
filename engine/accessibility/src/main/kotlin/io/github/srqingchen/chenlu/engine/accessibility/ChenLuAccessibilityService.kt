@@ -56,14 +56,33 @@ class ChenLuAccessibilityService : AccessibilityService() {
 
         /** 注入一次点击手势，挂起至手势完成，返回是否成功。 */
         suspend fun dispatchTap(x: Float, y: Float, durationMs: Long): Boolean {
-            val service = instance ?: run {
-                ChenLuLog.e("accessibility", "服务实例为空：无障碍未开启或已被系统回收")
-                return false
-            }
             val path = Path().apply {
                 moveTo(x, y)
                 // 微小位移避免零长度 stroke 在部分设备上被立即取消
                 lineTo(x, y + 0.1f)
+            }
+            return dispatchStroke(path, durationMs)
+        }
+
+        /** 注入一次直线滑动手势，挂起至完成。 */
+        suspend fun dispatchSwipe(
+            x1: Float,
+            y1: Float,
+            x2: Float,
+            y2: Float,
+            durationMs: Long,
+        ): Boolean {
+            val path = Path().apply {
+                moveTo(x1, y1)
+                lineTo(x2, y2)
+            }
+            return dispatchStroke(path, durationMs)
+        }
+
+        private suspend fun dispatchStroke(path: Path, durationMs: Long): Boolean {
+            val service = instance ?: run {
+                ChenLuLog.e("accessibility", "服务实例为空：无障碍未开启或已被系统回收")
+                return false
             }
             val stroke = GestureDescription.StrokeDescription(
                 path,
@@ -82,7 +101,7 @@ class ChenLuAccessibilityService : AccessibilityService() {
                         override fun onCancelled(gestureDescription: GestureDescription?) {
                             ChenLuLog.w(
                                 "accessibility",
-                                "手势被取消（x=$x,y=$y）：常见原因=用户手指在屏/目标界面拒绝/服务被暂停",
+                                "手势被取消：常见原因=用户手指在屏/目标界面拒绝/服务被暂停",
                             )
                             if (cont.isActive) cont.resume(false)
                         }

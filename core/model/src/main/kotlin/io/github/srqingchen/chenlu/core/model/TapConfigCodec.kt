@@ -10,7 +10,7 @@ import org.json.JSONObject
 object TapConfigCodec {
 
     fun toJson(config: TapConfig): String = JSONObject().apply {
-        put("v", 2)
+        put("v", 3)
         put("intervalMs", config.intervalMs)
         put("pressDurationMs", config.pressDurationMs)
         put("order", config.order.name)
@@ -18,6 +18,10 @@ object TapConfigCodec {
         put("totalDurationMs", config.totalDurationMs)
         put("jitterPx", config.jitterPx)
         put("jitterMs", config.jitterMs)
+        put("jitterPressMs", config.jitterPressMs)
+        put("swipeDx", config.swipeDx.toDouble())
+        put("swipeDy", config.swipeDy.toDouble())
+        put("swipeDurationMs", config.swipeDurationMs)
         put("targets", JSONArray().apply {
             config.targets.forEach { p ->
                 put(JSONArray().put(p.x.toDouble()).put(p.y.toDouble()))
@@ -45,6 +49,10 @@ object TapConfigCodec {
             totalDurationMs = o.optLong("totalDurationMs", 0L),
             jitterPx = o.optInt("jitterPx", 0),
             jitterMs = o.optLong("jitterMs", 0L),
+            jitterPressMs = o.optLong("jitterPressMs", 0L),
+            swipeDx = o.optDouble("swipeDx", 0.0).toFloat(),
+            swipeDy = o.optDouble("swipeDy", 0.0).toFloat(),
+            swipeDurationMs = o.optLong("swipeDurationMs", 0L),
         )
     }.getOrNull()
 }

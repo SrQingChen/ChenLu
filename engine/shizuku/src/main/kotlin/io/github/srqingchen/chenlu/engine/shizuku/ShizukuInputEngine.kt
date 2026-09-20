@@ -116,6 +116,33 @@ class ShizukuInputEngine(private val appContext: Context? = null) : InputEngine 
         }
     }
 
+    override suspend fun swipe(from: Point, to: Point, durationMs: Long): Boolean =
+        withContext(Dispatchers.IO) {
+            val injector = ShizukuManager.injector
+            if (injector == null) {
+                ChenLuLog.e("shizuku", "滑动失败：注入服务未连接")
+                return@withContext false
+            }
+            val bounds = screenBounds
+            val code = runCatching {
+                injector.injectSwipe(
+                    from.x, from.y, to.x, to.y, durationMs,
+                    bounds?.width() ?: 0, bounds?.height() ?: 0,
+                )
+            }.getOrElse { -1 }
+            when (code) {
+                InjectorService.RESULT_OK -> true
+                InjectorService.RESULT_FALLBACK_CMD -> {
+                    ChenLuLog.w("shizuku", "滑动已降级 input swipe。原因: ${runCatching { injector.lastError() }.getOrDefault("?")}")
+                    true
+                }
+                else -> {
+                    ChenLuLog.e("shizuku", "滑动失败 code=$code: ${runCatching { injector.lastError() }.getOrDefault("")}")
+                    false
+                }
+            }
+        }
+
     override suspend fun cancel() {
         // 注入为瞬时 DOWN/UP，无在途手势链；M1 手势链引入后实现
     }

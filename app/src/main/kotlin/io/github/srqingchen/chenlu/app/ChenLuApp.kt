@@ -3,6 +3,7 @@ package io.github.srqingchen.chenlu.app
 import android.app.Activity
 import android.app.Application
 import android.os.Bundle
+import io.github.srqingchen.chenlu.core.data.ClickStats
 import io.github.srqingchen.chenlu.core.data.TaskRepository
 import io.github.srqingchen.chenlu.core.shizuku.ShizukuManager
 import io.github.srqingchen.chenlu.engine.accessibility.AccessibilityInputEngine
@@ -19,6 +20,7 @@ class ChenLuApp : Application() {
         // 组装根：注册双引擎并开始监听 Shizuku。M1 引入 Hilt 后由 DI 容器接管。
         ShizukuManager.start(this)
         TaskRepository.init(this)
+        ClickStats.init(this)
         EngineRegistry.register(AccessibilityInputEngine())
         EngineRegistry.register(ShizukuInputEngine(this))
 

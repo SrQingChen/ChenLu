@@ -36,6 +36,9 @@ interface InputEngine {
     /** 注入一次点击，返回是否成功。 */
     suspend fun tap(point: Point, spec: TapSpec = TapSpec()): Boolean
 
+    /** 注入一次直线滑动手势（durationMs 为滑动总时长）。 */
+    suspend fun swipe(from: Point, to: Point, durationMs: Long): Boolean
+
     /**
      * 取消在途手势。dispatchGesture 无公开取消 API，M0 采用
      * “短手势 + 间隔等待”模式，天然无在途手势；M1 手势链引入后实现。

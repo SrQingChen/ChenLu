@@ -51,6 +51,21 @@ object AutomationController {
         _state.update { it.copy(config = transform(it.config)) }
     }
 
+    /** 供悬浮组件订阅的轻量回调（控制球变色 / 准星脉冲）。 */
+    @Volatile
+    var runningListener: ((Boolean) -> Unit)? = null
+
+    @Volatile
+    var clickListener: ((io.github.srqingchen.chenlu.core.model.Point) -> Unit)? = null
+
+    private fun notifyRunning(running: Boolean) {
+        runCatching { runningListener?.invoke(running) }
+    }
+
+    private fun notifyClick(point: io.github.srqingchen.chenlu.core.model.Point) {
+        runCatching { clickListener?.invoke(point) }
+    }
+
     fun toggle() {
         if (_state.value.running) stop() else start()
     }
@@ -78,7 +93,9 @@ object AutomationController {
             it.copy(running = true, executedCount = 0L, activeEngineId = engine.id, lastError = null)
         }
         ChenLuLog.i("controller", "任务启动：engine=${engine.id}, config=${_state.value.config}")
-        val startElapsed = android.os.SystemClock.elapsedRealtime()
+        notifyRunning(true)
+        sessionStartElapsed = android.os.SystemClock.elapsedRealtime()
+        val startElapsed = sessionStartElapsed!!
         appContext?.let {
             io.github.srqingchen.chenlu.service.island.FocusIslandPublisher.publishRunning(
                 it, count = 0, config = _state.value.config, engineId = engine.id, elapsedMs = 0,
@@ -121,9 +138,30 @@ object AutomationController {
                     } else {
                         point0
                     }
-                    val ok = engine.tap(point, TapSpec(durationMs = config.pressDurationMs))
+                    // 按压时长抖动（防检测）
+                    val pressMs = if (config.jitterPressMs > 0) {
+                        (config.pressDurationMs +
+                            Random.nextInt(
+                                (-config.jitterPressMs).toInt(),
+                                config.jitterPressMs.toInt() + 1,
+                            )).coerceAtLeast(10L)
+                    } else {
+                        config.pressDurationMs
+                    }
+
+                    val ok = if (config.swipeEnabled()) {
+                        val swipeTo = io.github.srqingchen.chenlu.core.model.Point(
+                            point.x + config.swipeDx,
+                            point.y + config.swipeDy,
+                        )
+                        engine.swipe(point, swipeTo, config.swipeDurationMs)
+                    } else {
+                        engine.tap(point, TapSpec(durationMs = pressMs))
+                    }
                     if (ok) {
                         consecutiveFailures = 0
+                        io.github.srqingchen.chenlu.core.data.ClickStats.onClick()
+                        notifyClick(point)
                         _state.update { it.copy(executedCount = it.executedCount + 1L, lastError = null) }
                     } else {                        consecutiveFailures++
                         if (consecutiveFailures == FAILURE_THRESHOLD) {
@@ -188,8 +226,18 @@ object AutomationController {
         loopJob?.cancel()
         loopJob = null
         _state.update { it.copy(running = false) }
+        notifyRunning(false)
+        sessionStartElapsed?.let { start ->
+            io.github.srqingchen.chenlu.core.data.ClickStats.onSession(
+                android.os.SystemClock.elapsedRealtime() - start,
+            )
+        }
+        sessionStartElapsed = null
         appContext?.let { io.github.srqingchen.chenlu.service.island.FocusIslandPublisher.onTaskStopped(it) }
     }
+
+    @Volatile
+    private var sessionStartElapsed: Long? = null
 
     /** 面板“间隔±”：步进 25ms。 */
     fun adjustInterval(deltaMs: Long) {

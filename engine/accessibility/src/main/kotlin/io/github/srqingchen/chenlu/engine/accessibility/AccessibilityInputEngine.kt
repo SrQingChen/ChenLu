@@ -42,6 +42,9 @@ class AccessibilityInputEngine : InputEngine {
     override suspend fun tap(point: Point, spec: TapSpec): Boolean =
         ChenLuAccessibilityService.dispatchTap(point.x, point.y, spec.durationMs)
 
+    override suspend fun swipe(from: Point, to: Point, durationMs: Long): Boolean =
+        ChenLuAccessibilityService.dispatchSwipe(from.x, from.y, to.x, to.y, durationMs)
+
     override suspend fun cancel() {
         // M0：短手势 + 间隔等待模式，无在途手势；M1 手势链引入后实现
     }

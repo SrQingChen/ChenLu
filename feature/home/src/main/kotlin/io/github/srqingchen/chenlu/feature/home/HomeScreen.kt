@@ -498,6 +498,57 @@ private fun TaskPage(
     FinishConditionCard(config = config)
 
     GlassCard {
+        Text("滑动模式", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("目标点执行滑动而非点击", style = MaterialTheme.typography.bodyMedium)
+            Switch(
+                checked = config.swipeEnabled(),
+                onCheckedChange = { on ->
+                    AutomationController.updateConfig {
+                        it.copy(swipeDurationMs = if (on) 300L else 0L)
+                    }
+                },
+            )
+        }
+        if (config.swipeEnabled()) {
+            Text("X 偏移：${config.swipeDx.toInt()}px", style = MaterialTheme.typography.bodyMedium)
+            Slider(
+                value = config.swipeDx,
+                onValueChange = {
+                    AutomationController.updateConfig { c -> c.copy(swipeDx = it) }
+                },
+                valueRange = -300f..300f,
+            )
+            Text("Y 偏移：${config.swipeDy.toInt()}px", style = MaterialTheme.typography.bodyMedium)
+            Slider(
+                value = config.swipeDy,
+                onValueChange = {
+                    AutomationController.updateConfig { c -> c.copy(swipeDy = it) }
+                },
+                valueRange = -300f..300f,
+            )
+            Text("滑动时长：${config.swipeDurationMs}ms", style = MaterialTheme.typography.bodyMedium)
+            Slider(
+                value = config.swipeDurationMs.toFloat(),
+                onValueChange = {
+                    AutomationController.updateConfig { c -> c.copy(swipeDurationMs = it.toLong()) }
+                },
+                valueRange = 100f..1000f,
+            )
+        }
+        Text(
+            "开启后每个目标点执行「从准星位置出发的直线滑动」（准星标记起点）；" +
+                "配合坐标抖动可获得更自然的轨迹。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+
+    GlassCard {
         Text("防检测", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
         Text(
             "坐标抖动与时序抖动让点击更接近真人，配合「随机」顺序构成防检测三件套。0 = 关闭。",
@@ -525,6 +576,17 @@ private fun TaskPage(
                 AutomationController.updateConfig { c -> c.copy(jitterMs = it.toLong()) }
             },
             valueRange = 0f..100f,
+        )
+        Text(
+            "按压抖动：" + if (config.jitterPressMs > 0) "±${config.jitterPressMs}ms" else "关",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Slider(
+            value = config.jitterPressMs.toFloat(),
+            onValueChange = {
+                AutomationController.updateConfig { c -> c.copy(jitterPressMs = it.toLong()) }
+            },
+            valueRange = 0f..50f,
         )
     }
 
@@ -918,8 +980,15 @@ private fun DiagPage(
 
     GlassCard {
         Text("关于", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        val stats by io.github.srqingchen.chenlu.core.data.ClickStats.stats.collectAsStateWithLifecycle()
         Text(
-            "尘露 v0.5.0 · GPL-3.0 开源 · github.com/SrQingChen/ChenLu\n" +
+            "今日点击 ${stats.todayClicks} · 累计 ${stats.totalClicks} · 累计运行 " +
+                "${stats.totalRunMs / 60000} 分钟",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Text(
+            "尘露 v0.9.0 · GPL-3.0 开源 · github.com/SrQingChen/ChenLu\n" +
                 "免费无广告。仅供学习研究与个人效率用途，请遵守目标应用条款（详见仓库 DISCLAIMER）。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,

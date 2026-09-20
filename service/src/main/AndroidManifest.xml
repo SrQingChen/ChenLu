@@ -10,5 +10,16 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="automation_task_executor: executes user-configured gesture injection tasks while the user interacts with the device" />
         </service>
+
+        <service
+            android:name=".tile.ChenLuTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_stat_chenlu"
+            android:label="@string/chenlu_tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>

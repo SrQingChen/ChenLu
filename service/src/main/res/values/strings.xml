@@ -6,4 +6,5 @@
     <string name="chenlu_notification_text">通过悬浮球或应用内控制启停</string>
     <string name="chenlu_action_toggle">启停</string>
     <string name="chenlu_action_stop">停止</string>
+    <string name="chenlu_tile_label">尘露连点</string>
 </resources>
