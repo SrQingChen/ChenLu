@@ -43,6 +43,7 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -79,6 +80,7 @@ import io.github.srqingchen.chenlu.engine.api.EngineState
 import io.github.srqingchen.chenlu.engine.api.InputEngine
 import io.github.srqingchen.chenlu.service.AutomationController
 import io.github.srqingchen.chenlu.service.AutomationService
+import io.github.srqingchen.chenlu.service.island.FocusIslandPublisher
 import io.github.srqingchen.chenlu.service.overlay.OverlayHost
 
 /** 底部分区定义：title 大标题，subtitle 功能分类，tags 页头功能标签。 */
@@ -622,6 +624,69 @@ private fun EnginePage(
             onRequestPermission = onRequestShizukuPermission,
             onOpenShizuku = onOpenShizuku,
             onRetry = onRetryShizuku,
+        )
+    }
+
+    // 无障碍找不到入口时的 Shizuku 一键开启
+    if (shizukuState is ShizukuState.Ready &&
+        engines.any { it.id == "accessibility" && it.state.value is EngineState.Unavailable }
+    ) {
+        val context = LocalContext.current
+        GlassCard {
+            Text(
+                "无障碍入口找不到？",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            FilledTonalButton(
+                onClick = {
+                    val component =
+                        "${context.packageName}/io.github.srqingchen.chenlu.engine.accessibility.ChenLuAccessibilityService"
+                    ShizukuManager.enableAccessibilityService(component)
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("经 Shizuku 一键开启无障碍")
+            }
+            Text(
+                "无需在系统设置里寻找入口（shell 权限直接写入系统设置）。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+
+    GlassCard {
+        Text("原生超级岛（澎湃 OS 3）", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("任务状态上岛", style = MaterialTheme.typography.bodyMedium)
+            Switch(
+                checked = FocusIslandPublisher.enabled,
+                onCheckedChange = { FocusIslandPublisher.enabled = it },
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("兼容模式（断 xmsf 鉴权）", style = MaterialTheme.typography.bodyMedium)
+            Switch(
+                checked = FocusIslandPublisher.compatMode,
+                onCheckedChange = { FocusIslandPublisher.compatMode = it },
+            )
+        }
+        Text(
+            "运行任务时状态卡片将登上系统超级岛（计数/节奏/进度环，可启停）；" +
+                "非白名单应用需开兼容模式：发布期间临时切断小米推送服务联网令鉴权放行" +
+                "（MAA 同款做法），期间全机小米推送可能延迟，任务结束自动恢复。" +
+                "未生效时退化为常驻通知。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 

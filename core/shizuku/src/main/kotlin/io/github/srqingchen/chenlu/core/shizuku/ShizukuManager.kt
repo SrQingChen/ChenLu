@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.IBinder
+import io.github.srqingchen.chenlu.core.common.ChenLuLog
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -113,6 +114,21 @@ object ShizukuManager {
     /** 立即尝试绑定（UI“重试”按钮）。 */
     fun rebind() {
         onBinderAlive()
+    }
+
+    /** 经 Shizuku（shell）一键开启无障碍服务；返回 null 表示成功。 */
+    fun enableAccessibilityService(component: String): String? {
+        val injector = injector ?: return "注入服务未连接"
+        return runCatching { injector.enableAccessibilityService(component) }
+            .getOrElse { it.message }
+            ?.also { ChenLuLog.e("shizuku", "一键开启无障碍失败: $it") }
+            ?: ChenLuLog.i("shizuku", "一键开启无障碍成功: $component").let { null }
+    }
+
+    /** 超级岛兼容模式：临时切断/恢复 xmsf 联网；返回 null 表示成功。 */
+    fun xmsfGate(block: Boolean): String? {
+        val injector = injector ?: return "注入服务未连接"
+        return runCatching { injector.xmsfGate(block) }.getOrElse { it.message }
     }
 
     private fun onBinderAlive() {

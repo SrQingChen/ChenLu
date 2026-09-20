@@ -56,6 +56,27 @@ class InjectorService : Binder() {
                 return true
             }
 
+            TRANSACTION_XMSF_GATE -> {
+                data.enforceInterface(DESCRIPTOR)
+                val block = data.readInt() != 0
+                val (code, out) = runCatching { xmsfGate(block) }.getOrElse { -1 to it.message.orEmpty() }
+                reply?.writeNoException()
+                reply?.writeInt(code)
+                reply?.writeString(out)
+                return true
+            }
+
+            TRANSACTION_ENABLE_ACCESSIBILITY -> {
+                data.enforceInterface(DESCRIPTOR)
+                val component = data.readString().orEmpty()
+                val (code, out) = runCatching { enableAccessibility(component) }
+                    .getOrElse { -1 to it.message.orEmpty() }
+                reply?.writeNoException()
+                reply?.writeInt(code)
+                reply?.writeString(out)
+                return true
+            }
+
             TRANSACTION_DESTROY -> {
                 reply?.writeNoException()
                 Thread {
@@ -166,6 +187,38 @@ class InjectorService : Binder() {
         RESULT_FAIL
     }
 
+    private fun execCommand(timeoutSec: Long = 3, vararg cmd: String): Pair<Int, String> = try {
+        val process = ProcessBuilder(*cmd).redirectErrorStream(true).start()
+        val output = process.inputStream.readBytes().decodeToString().trim()
+        val finished = process.waitFor(timeoutSec, TimeUnit.SECONDS)
+        (if (finished) process.exitValue() else -1) to output
+    } catch (t: Throwable) {
+        -1 to (t.message ?: t.javaClass.simpleName)
+    }
+
+    /** 经 shell 写 secure 设置：合并 enabled_accessibility_services 并开启总开关。 */
+    private fun enableAccessibility(component: String): Pair<Int, String> {
+        if (component.isBlank()) return -1 to "component 为空"
+        val (gc, current) = execCommand(3, "settings", "get", "secure", "enabled_accessibility_services")
+        if (gc != 0) return gc to "读取失败: $current"
+        val existing = current.trim().trim('"').split(':').filter { it.isNotBlank() }
+        if (component in existing) {
+            val (ec, eo) = execCommand(3, "settings", "put", "secure", "accessibility_enabled", "1")
+            return ec to eo
+        }
+        val merged = (existing + component).joinToString(":")
+        val (pc, po) = execCommand(3, "settings", "put", "secure", "enabled_accessibility_services", merged)
+        if (pc != 0) return pc to po
+        val (ec, eo) = execCommand(3, "settings", "put", "secure", "accessibility_enabled", "1")
+        return ec to eo
+    }
+
+    /** 超级岛兼容模式：临时切断/恢复小米推送服务（xmsf）联网，令云端白名单鉴权 fail-open。 */
+    private fun xmsfGate(block: Boolean): Pair<Int, String> {
+        val flag = if (block) "false" else "true"
+        return execCommand(4, "cmd", "connectivity", "set-package-networking-enabled", flag, "com.xiaomi.xmsf")
+    }
+
     private val inputManager: Any? by lazy {
         runCatching {
             Class.forName("android.hardware.input.InputManager")
@@ -213,7 +266,7 @@ class InjectorService : Binder() {
 
     companion object {
         /** 与 UserServiceArgs.version 联动：不匹配时 Shizuku 自动销毁旧服务进程。 */
-        const val VERSION = 4
+        const val VERSION = 5
 
         const val RESULT_FAIL = 0
         const val RESULT_OK = 1
@@ -227,6 +280,8 @@ class InjectorService : Binder() {
         private const val TRANSACTION_VERSION = IBinder.FIRST_CALL_TRANSACTION
         private const val TRANSACTION_INJECT_TAP = IBinder.FIRST_CALL_TRANSACTION + 1
         private const val TRANSACTION_LAST_ERROR = IBinder.FIRST_CALL_TRANSACTION + 2
+        private const val TRANSACTION_XMSF_GATE = IBinder.FIRST_CALL_TRANSACTION + 3
+        private const val TRANSACTION_ENABLE_ACCESSIBILITY = IBinder.FIRST_CALL_TRANSACTION + 4
 
         private const val PRESSURE = 1f
         private const val SIZE = 1f

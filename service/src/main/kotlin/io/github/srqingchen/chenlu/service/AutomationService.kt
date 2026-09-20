@@ -26,6 +26,8 @@ class AutomationService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         AutomationController.attachScope(lifecycleScope)
+        AutomationController.attachContext(this)
+        io.github.srqingchen.chenlu.service.island.FocusIslandPublisher.restoreGateIfNeeded(this)
         ensureDefaultTarget()
         createChannel()
         startInForeground()

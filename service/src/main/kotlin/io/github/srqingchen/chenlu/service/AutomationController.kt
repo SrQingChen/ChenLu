@@ -33,11 +33,18 @@ object AutomationController {
     @Volatile
     private var serviceScope: CoroutineScope? = null
 
+    @Volatile
+    private var appContext: android.content.Context? = null
+
     private var loopJob: Job? = null
 
-    /** 由 AutomationService 在 onCreate 时挂载其 lifecycleScope。 */
+    /** 由 AutomationService 在 onCreate 时挂载其 lifecycleScope 与应用上下文。 */
     fun attachScope(scope: CoroutineScope) {
         serviceScope = scope
+    }
+
+    fun attachContext(context: android.content.Context) {
+        appContext = context.applicationContext
     }
 
     fun updateConfig(transform: (TapConfig) -> TapConfig) {
@@ -71,6 +78,12 @@ object AutomationController {
             it.copy(running = true, executedCount = 0L, activeEngineId = engine.id, lastError = null)
         }
         ChenLuLog.i("controller", "任务启动：engine=${engine.id}, config=${_state.value.config}")
+        appContext?.let {
+            io.github.srqingchen.chenlu.service.island.FocusIslandPublisher.publish(
+                it, running = true, count = 0, config = _state.value.config, engineId = engine.id,
+            )
+        }
+        var lastIslandMs = 0L
         loopJob = scope.launch {
             var consecutiveFailures = 0
             var seqIndex = 0
@@ -100,8 +113,7 @@ object AutomationController {
                     if (ok) {
                         consecutiveFailures = 0
                         _state.update { it.copy(executedCount = it.executedCount + 1L, lastError = null) }
-                    } else {
-                        consecutiveFailures++
+                    } else {                        consecutiveFailures++
                         if (consecutiveFailures == FAILURE_THRESHOLD) {
                             ChenLuLog.e(
                                 "controller",
@@ -113,6 +125,20 @@ object AutomationController {
                         }
                     }
                     delay(config.intervalMs.coerceAtLeast(16L))
+                    // 超级岛 1Hz 节流刷新
+                    val nowMs = android.os.SystemClock.elapsedRealtime()
+                    if (nowMs - lastIslandMs >= 1000L) {
+                        lastIslandMs = nowMs
+                        appContext?.let { ctx ->
+                            io.github.srqingchen.chenlu.service.island.FocusIslandPublisher.publish(
+                                ctx,
+                                running = true,
+                                count = _state.value.executedCount,
+                                config = config,
+                                engineId = engine.id,
+                            )
+                        }
+                    }
                 }
             } catch (_: CancellationException) {
                 // stop() 触发，正常退出
@@ -127,5 +153,6 @@ object AutomationController {
         loopJob?.cancel()
         loopJob = null
         _state.update { it.copy(running = false) }
+        appContext?.let { io.github.srqingchen.chenlu.service.island.FocusIslandPublisher.dismiss(it) }
     }
 }

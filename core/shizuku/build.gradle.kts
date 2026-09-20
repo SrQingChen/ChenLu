@@ -12,6 +12,7 @@ android {
 
 dependencies {
     api(libs.shizuku.api)
+    implementation(project(":core:common"))
     implementation(libs.shizuku.provider)
     implementation(libs.androidx.annotation)
     api(libs.kotlinx.coroutines.core)

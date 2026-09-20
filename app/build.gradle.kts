@@ -8,8 +8,8 @@ android {
 
     defaultConfig {
         applicationId = "io.github.srqingchen.chenlu"
-        versionCode = 8
-        versionName = "0.5.0-glass"
+        versionCode = 9
+        versionName = "0.6.0-island"
     }
 
     buildTypes {

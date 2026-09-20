@@ -60,6 +60,31 @@ class InjectorProxy(private val binder: IBinder) {
         }
     }
 
+    /** 超级岛兼容模式：block=true 切断 xmsf 联网（云端鉴权 fail-open），false 恢复。 */
+    fun xmsfGate(block: Boolean): String? =
+        transact2(TRANSACTION_XMSF_GATE) { it.writeInt(if (block) 1 else 0) }
+
+    /** 经 shell 写 secure 设置开启无障碍服务。 */
+    fun enableAccessibilityService(component: String): String? =
+        transact2(TRANSACTION_ENABLE_ACCESSIBILITY) { it.writeString(component) }
+
+    private fun transact2(code: Int, write: (Parcel) -> Unit): String? {
+        val data = Parcel.obtain()
+        val reply = Parcel.obtain()
+        return try {
+            data.writeInterfaceToken(DESCRIPTOR)
+            write(data)
+            binder.transact(code, data, reply, 0)
+            reply.readException()
+            val resultCode = reply.readInt()
+            val detail = reply.readString().orEmpty()
+            if (resultCode == 0) null else "code=$resultCode: $detail"
+        } finally {
+            reply.recycle()
+            data.recycle()
+        }
+    }
+
     fun destroy() {
         val data = Parcel.obtain()
         val reply = Parcel.obtain()
@@ -78,6 +103,8 @@ class InjectorProxy(private val binder: IBinder) {
         private const val TRANSACTION_VERSION = IBinder.FIRST_CALL_TRANSACTION
         private const val TRANSACTION_INJECT_TAP = IBinder.FIRST_CALL_TRANSACTION + 1
         private const val TRANSACTION_LAST_ERROR = IBinder.FIRST_CALL_TRANSACTION + 2
+        private const val TRANSACTION_XMSF_GATE = IBinder.FIRST_CALL_TRANSACTION + 3
+        private const val TRANSACTION_ENABLE_ACCESSIBILITY = IBinder.FIRST_CALL_TRANSACTION + 4
         private const val TRANSACTION_DESTROY = 16777114
     }
 }
