@@ -16,6 +16,8 @@ object TapConfigCodec {
         put("order", config.order.name)
         put("totalClicks", config.totalClicks)
         put("totalDurationMs", config.totalDurationMs)
+        put("jitterPx", config.jitterPx)
+        put("jitterMs", config.jitterMs)
         put("targets", JSONArray().apply {
             config.targets.forEach { p ->
                 put(JSONArray().put(p.x.toDouble()).put(p.y.toDouble()))
@@ -41,6 +43,8 @@ object TapConfigCodec {
             }.getOrDefault(TargetOrder.SEQUENTIAL),
             totalClicks = o.optLong("totalClicks", 0L),
             totalDurationMs = o.optLong("totalDurationMs", 0L),
+            jitterPx = o.optInt("jitterPx", 0),
+            jitterMs = o.optLong("jitterMs", 0L),
         )
     }.getOrNull()
 }

@@ -105,10 +105,20 @@ object AutomationController {
                         ChenLuLog.e("controller", "目标点为空，任务停止")
                         return@launch
                     }
-                    val point = when {
+                    val point0 = when {
                         targets.size == 1 -> targets[0]
                         config.order == TargetOrder.RANDOM -> targets[Random.nextInt(targets.size)]
                         else -> targets[seqIndex++ % targets.size]
+                    }
+                    // 防检测：坐标随机偏移
+                    val point = if (config.jitterPx > 0) {
+                        val r = config.jitterPx
+                        io.github.srqingchen.chenlu.core.model.Point(
+                            point0.x + (Random.nextInt(r * 2 + 1) - r),
+                            point0.y + (Random.nextInt(r * 2 + 1) - r),
+                        )
+                    } else {
+                        point0
                     }
                     val ok = engine.tap(point, TapSpec(durationMs = config.pressDurationMs))
                     if (ok) {
@@ -125,7 +135,13 @@ object AutomationController {
                             }
                         }
                     }
-                    delay(config.intervalMs.coerceAtLeast(16L))
+                    // 防检测：时序抖动（±jitterMs）
+                    val jitterDelayMs = if (config.jitterMs > 0) {
+                        Random.nextInt((-config.jitterMs).toInt(), config.jitterMs.toInt() + 1)
+                    } else {
+                        0
+                    }
+                    delay((config.intervalMs + jitterDelayMs).coerceAtLeast(16L))
 
                     // 完成条件（总次数 / 总时长）到量自动停止
                     val elapsed = android.os.SystemClock.elapsedRealtime() - startElapsed

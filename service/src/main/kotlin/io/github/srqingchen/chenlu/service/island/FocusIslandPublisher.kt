@@ -57,9 +57,12 @@ object FocusIslandPublisher {
     @Volatile
     var idleEnabled = true
 
-    /** 由 Application 的 ActivityLifecycleCallbacks 维护。 */
+    /**
+     * 由 Application 的 ActivityLifecycleCallbacks 维护。
+     * 默认 false：进程可能由悬浮球/服务拉起（无 Activity 生命周期），此时视为后台。
+     */
     @Volatile
-    var appForeground = true
+    var appForeground = false
 
     private val gateExecutor = Executors.newSingleThreadExecutor()
 
@@ -147,15 +150,16 @@ object FocusIslandPublisher {
         releaseGate(appContext)
     }
 
-    /** 服务启动时调用：若上次异常遗留了断网状态，恢复 xmsf。 */
+    /** 服务启动时调用：仅当本进程内存态认为未断网（进程刚重建）时，清理上次遗留的断网状态。 */
     fun restoreGateIfNeeded(context: Context) {
+        // 同进程内 gateActive 是权威状态：岛正在展示（断网生效中）时绝不能“恢复”
+        if (gateActive) return
         val flag = gateFlagFile(context)
         if (flag.exists()) {
             gateExecutor.execute {
                 val err = ShizukuManager.xmsfGate(false)
                 if (err == null) {
                     flag.delete()
-                    gateActive = false
                     ChenLuLog.i("island", "已恢复上次遗留的 xmsf 断网状态")
                 }
             }

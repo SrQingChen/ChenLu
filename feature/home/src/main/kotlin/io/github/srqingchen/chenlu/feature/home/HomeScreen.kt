@@ -495,6 +495,37 @@ private fun TaskPage(
 
     FinishConditionCard(config = config)
 
+    GlassCard {
+        Text("防检测", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Text(
+            "坐标抖动与时序抖动让点击更接近真人，配合「随机」顺序构成防检测三件套。0 = 关闭。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            "坐标抖动：" + if (config.jitterPx > 0) "±${config.jitterPx}px" else "关",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Slider(
+            value = config.jitterPx.toFloat(),
+            onValueChange = {
+                AutomationController.updateConfig { c -> c.copy(jitterPx = it.toInt()) }
+            },
+            valueRange = 0f..30f,
+        )
+        Text(
+            "时序抖动：" + if (config.jitterMs > 0) "±${config.jitterMs}ms" else "关",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Slider(
+            value = config.jitterMs.toFloat(),
+            onValueChange = {
+                AutomationController.updateConfig { c -> c.copy(jitterMs = it.toLong()) }
+            },
+            valueRange = 0f..100f,
+        )
+    }
+
     TaskLibraryCard(onSave = onSaveTask, onLoad = onLoadTask, onDelete = onDeleteTask)
 }
 
