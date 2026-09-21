@@ -49,6 +49,30 @@ object AutomationController {
 
     fun updateConfig(transform: (TapConfig) -> TapConfig) {
         _state.update { it.copy(config = transform(it.config)) }
+        schedulePersist()
+    }
+
+    /** 启动时恢复上次会话配置。 */
+    fun restoreConfig(config: TapConfig) {
+        _state.update { it.copy(config = config) }
+        ChenLuLog.i("controller", "已恢复上次会话配置：${config}")
+    }
+
+    private val persistExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+
+    @Volatile
+    private var persistPending = false
+
+    /** 防抖落盘（800ms）：滑杆高频变更不产生高频 IO。 */
+    private fun schedulePersist() {
+        if (persistPending) return
+        persistPending = true
+        persistExecutor.execute {
+            runCatching { Thread.sleep(800) }
+            persistPending = false
+            val ctx = appContext ?: return@execute
+            io.github.srqingchen.chenlu.core.data.SessionStore.saveConfig(ctx, _state.value.config)
+        }
     }
 
     /** 供悬浮组件订阅的轻量回调（控制球变色 / 准星脉冲）。 */

@@ -130,6 +130,8 @@ fun HomeScreen(modifier: Modifier = Modifier) {
         overlayGranted = Settings.canDrawOverlays(context)
         notifGranted = NotificationManagerCompat.from(context).areNotificationsEnabled()
         ballShown = OverlayHost.isBallShown
+        // 回前台重查 Shizuku（晚安装/可见性/晚启动场景恢复）
+        ShizukuManager.refresh()
         onPauseOrDispose { }
     }
 
@@ -227,7 +229,10 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                         engines = engines,
                         preference = preference,
                         shizukuState = shizukuState,
-                        onSelectPreference = EngineRegistry::setPreference,
+                        onSelectPreference = { id ->
+                            EngineRegistry.setPreference(id)
+                            io.github.srqingchen.chenlu.core.data.SessionStore.saveEnginePreference(context, id)
+                        },
                         onRequestShizukuPermission = { ShizukuManager.requestPermission() },
                         onOpenShizuku = { ShizukuManager.openShizukuApp(context) },
                         onRetryShizuku = { ShizukuManager.rebind() },
@@ -870,6 +875,15 @@ private fun EnginePage(
 
     GlassCard {
         Text("原生超级岛（澎湃 OS 3）", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        val context = LocalContext.current
+        fun persistIsland() {
+            io.github.srqingchen.chenlu.core.data.SessionStore.saveIslandFlags(
+                context,
+                FocusIslandPublisher.enabled,
+                FocusIslandPublisher.compatMode,
+                FocusIslandPublisher.idleEnabled,
+            )
+        }
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -878,7 +892,10 @@ private fun EnginePage(
             Text("任务状态上岛", style = MaterialTheme.typography.bodyMedium)
             Switch(
                 checked = FocusIslandPublisher.enabled,
-                onCheckedChange = { FocusIslandPublisher.enabled = it },
+                onCheckedChange = {
+                    FocusIslandPublisher.enabled = it
+                    persistIsland()
+                },
             )
         }
         Row(
@@ -889,7 +906,10 @@ private fun EnginePage(
             Text("兼容模式（断 xmsf 鉴权）", style = MaterialTheme.typography.bodyMedium)
             Switch(
                 checked = FocusIslandPublisher.compatMode,
-                onCheckedChange = { FocusIslandPublisher.compatMode = it },
+                onCheckedChange = {
+                    FocusIslandPublisher.compatMode = it
+                    persistIsland()
+                },
             )
         }
         Row(
@@ -900,7 +920,10 @@ private fun EnginePage(
             Text("常驻待命岛（离开应用显示）", style = MaterialTheme.typography.bodyMedium)
             Switch(
                 checked = FocusIslandPublisher.idleEnabled,
-                onCheckedChange = { FocusIslandPublisher.idleEnabled = it },
+                onCheckedChange = {
+                    FocusIslandPublisher.idleEnabled = it
+                    persistIsland()
+                },
             )
         }
         Text(
@@ -955,7 +978,8 @@ private fun ShizukuActionRow(
 ) {
     when (state) {
         ShizukuState.NotInstalled -> Text(
-            "未检测到 Shizuku。安装并激活后可获得更快、更不易被检测的点击引擎；无障碍引擎无需它即可使用。",
+            "未检测到 Shizuku。请确认：已安装官方版（包名 moe.shizuku.privileged.api）且版本 v11+，" +
+                "旧版本请到 GitHub Releases 更新后再回到本页（会自动重查）。无障碍引擎无需它即可使用。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

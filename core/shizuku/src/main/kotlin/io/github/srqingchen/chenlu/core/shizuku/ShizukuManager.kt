@@ -68,7 +68,7 @@ object ShizukuManager {
             .processNameSuffix("injector")
             .debuggable(false)
 
-    /** App 启动时调用：安装检测 + Binder/权限监听。幂等。 */
+    /** App 启动时调用：无条件注册 Binder/权限监听（幂等），随后评估一次状态。 */
     fun start(context: Context) {
         if (started) return
         synchronized(this) {
@@ -76,16 +76,7 @@ object ShizukuManager {
             started = true
             appContext = context.applicationContext
         }
-        val ctx = appContext ?: return
-        val installed = runCatching {
-            ctx.packageManager.getPackageInfo(SHIZUKU_PACKAGE, 0)
-            true
-        }.getOrDefault(false)
-        if (!installed) {
-            _state.value = ShizukuState.NotInstalled
-            return
-        }
-
+        // 监听无条件注册：即使当时未安装/未运行，后续 Shizuku 启动也能收到回调
         Shizuku.addBinderReceivedListenerSticky { onBinderAlive() }
         Shizuku.addBinderDeadListener {
             injector = null
@@ -93,6 +84,33 @@ object ShizukuManager {
         }
         Shizuku.addRequestPermissionResultListener { _, result ->
             if (result == PackageManager.PERMISSION_GRANTED) onBinderAlive()
+        }
+        refresh()
+    }
+
+    /**
+     * 重新评估状态（应用回到前台/用户点重试时调用）：
+     * 重查安装（可见性/晚安装场景）并尝试即时 ping。
+     */
+    fun refresh() {
+        val ctx = appContext ?: return
+        val info = runCatching {
+            ctx.packageManager.getPackageInfo(SHIZUKU_PACKAGE, 0)
+        }.getOrNull()
+        if (info == null) {
+            ChenLuLog.w(
+                "shizuku",
+                "包检查未见 $SHIZUKU_PACKAGE（确认已安装官方版 v11+；旧版本请到 GitHub Releases 更新）",
+            )
+            _state.value = ShizukuState.NotInstalled
+            return
+        }
+        val binderAlive = runCatching { Shizuku.pingBinder() }.getOrDefault(false)
+        ChenLuLog.i("shizuku", "检测到 Shizuku ${info.versionName}，binder=$binderAlive")
+        if (binderAlive) {
+            onBinderAlive()
+        } else if (_state.value !is ShizukuState.Ready) {
+            _state.value = ShizukuState.NotRunning
         }
     }
 
@@ -120,7 +138,7 @@ object ShizukuManager {
 
     /** 立即尝试绑定（UI“重试”按钮）。 */
     fun rebind() {
-        onBinderAlive()
+        refresh()
     }
 
     /** 经 Shizuku（shell）一键开启无障碍服务（含解除受限设置与回读校验）；返回 null 表示成功。 */

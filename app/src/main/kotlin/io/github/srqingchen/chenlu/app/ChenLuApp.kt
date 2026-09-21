@@ -4,11 +4,13 @@ import android.app.Activity
 import android.app.Application
 import android.os.Bundle
 import io.github.srqingchen.chenlu.core.data.ClickStats
+import io.github.srqingchen.chenlu.core.data.SessionStore
 import io.github.srqingchen.chenlu.core.data.TaskRepository
 import io.github.srqingchen.chenlu.core.shizuku.ShizukuManager
 import io.github.srqingchen.chenlu.engine.accessibility.AccessibilityInputEngine
 import io.github.srqingchen.chenlu.engine.api.EngineRegistry
 import io.github.srqingchen.chenlu.engine.shizuku.ShizukuInputEngine
+import io.github.srqingchen.chenlu.service.AutomationController
 import io.github.srqingchen.chenlu.service.island.FocusIslandPublisher
 
 class ChenLuApp : Application() {
@@ -23,6 +25,16 @@ class ChenLuApp : Application() {
         ClickStats.init(this)
         EngineRegistry.register(AccessibilityInputEngine())
         EngineRegistry.register(ShizukuInputEngine(this))
+
+        // 恢复上次会话：连点配置 / 引擎偏好 / 岛开关
+        AutomationController.attachContext(this)
+        SessionStore.loadConfig(this)?.let(AutomationController::restoreConfig)
+        SessionStore.loadEnginePreference(this)?.let(EngineRegistry::setPreference)
+        SessionStore.loadIslandFlags(this)?.let { (enabled, compat, idle) ->
+            FocusIslandPublisher.enabled = enabled
+            FocusIslandPublisher.compatMode = compat
+            FocusIslandPublisher.idleEnabled = idle
+        }
 
         // 前后台监听：离开应用上待命岛，回应用收起
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
