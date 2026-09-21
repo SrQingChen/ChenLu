@@ -395,7 +395,7 @@ class InjectorService : Binder() {
 
     companion object {
         /** 与 UserServiceArgs.version 联动：不匹配时 Shizuku 自动销毁旧服务进程。 */
-        const val VERSION = 7
+        const val VERSION = 8
 
         const val RESULT_FAIL = 0
         const val RESULT_OK = 1
@@ -416,7 +416,7 @@ class InjectorService : Binder() {
         private const val PRESSURE = 1f
         private const val SIZE = 1f
 
-        /** InputManager.INJECT_INPUT_EVENT_MODE_WAIT_FOR_FINISH */
-        private const val MODE_WAIT_FOR_FINISH = 2
+        /** InputManager.INJECT_INPUT_EVENT_MODE_WAIT_FOR_RESULT（与系统 input 命令一致，等待更短） */
+        private const val MODE_WAIT_FOR_FINISH = 1
     }
 }

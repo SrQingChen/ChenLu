@@ -30,6 +30,13 @@ class KernelTouchInjector {
     private var maxY = 0f
     private var nextTrackingId = 1
 
+    /**
+     * 负缓存：探测/打开失败的原因。本服务进程生命周期内不再重试
+     * （否则每次点击都要重跑 getevent 子进程探测，固定成本 ~300ms 淹没点击间隔）。
+     */
+    @Volatile
+    private var disabledReason: String? = null
+
     /** 最近一次初始化的节点描述（成功时也写入，便于诊断确认内核链是否生效）。 */
     var statusNote: String = ""
         private set
@@ -42,10 +49,17 @@ class KernelTouchInjector {
         val yMax: Float,
     )
 
-    /** 探测并打开触屏节点。成功返回 null，失败返回原因。 */
+    /** 探测并打开触屏节点。成功返回 null，失败返回原因（并负缓存，生命周期内不再重试）。 */
     @Synchronized
     fun init(screenW: Int, screenH: Int): String? {
         if (fd != null) return null
+        disabledReason?.let { return it }
+        val reason = probeAndOpen(screenW, screenH)
+        if (reason != null) disabledReason = reason
+        return reason
+    }
+
+    private fun probeAndOpen(screenW: Int, screenH: Int): String? {
         var lastError = ""
 
         for (args in listOf(arrayOf("getevent", "-il"), arrayOf("getevent", "-i"))) {
