@@ -10,7 +10,7 @@ import org.json.JSONObject
 object TapConfigCodec {
 
     fun toJson(config: TapConfig): String = JSONObject().apply {
-        put("v", 4)
+        put("v", 5)
         put("intervalMs", config.intervalMs)
         put("pressDurationMs", config.pressDurationMs)
         put("order", config.order.name)
@@ -41,6 +41,38 @@ object TapConfigCodec {
                 },
             )
         }
+        put(
+            "vision",
+            JSONObject().apply {
+                val v = config.vision
+                put("enabled", v.enabled)
+                put("checkIntervalMs", v.checkIntervalMs)
+                v.imageRule?.let { r ->
+                    put(
+                        "imageRule",
+                        JSONObject()
+                            .put("templateFile", r.templateFile)
+                            .put("threshold", r.threshold.toDouble())
+                            .put("dx", r.dx)
+                            .put("dy", r.dy),
+                    )
+                }
+                v.colorRule?.let { r ->
+                    put(
+                        "colorRule",
+                        JSONObject()
+                            .put("x", r.x)
+                            .put("y", r.y)
+                            .put("color", r.color)
+                            .put("tolerance", r.tolerance)
+                            .put("action", r.action.name),
+                    )
+                }
+                v.textRule?.let { r ->
+                    put("textRule", JSONObject().put("text", r.text))
+                }
+            },
+        )
         put("targets", JSONArray().apply {
             config.targets.forEach { p ->
                 put(JSONArray().put(p.x.toDouble()).put(p.y.toDouble()))
@@ -86,10 +118,10 @@ object TapConfigCodec {
                                         val p = pts.getJSONArray(j)
                                         add(
                                             TimedPoint(
-                                                p.getLong(0),
-                                                p.getDouble(1).toFloat(),
-                                                p.getDouble(2).toFloat(),
-                                            ),
+                                p.getLong(0),
+                                p.getDouble(1).toFloat(),
+                                p.getDouble(2).toFloat(),
+                            ),
                                         )
                                     }
                                 },
@@ -98,6 +130,35 @@ object TapConfigCodec {
                     }
                 }
             }.getOrDefault(emptyList()),
+            vision = runCatching {
+                val vo = o.optJSONObject("vision") ?: return@runCatching VisionConfig()
+                VisionConfig(
+                    enabled = vo.optBoolean("enabled", false),
+                    checkIntervalMs = vo.optLong("checkIntervalMs", 500L),
+                    imageRule = vo.optJSONObject("imageRule")?.let { io ->
+                        ImageRule(
+                            templateFile = io.optString("templateFile"),
+                            threshold = io.optDouble("threshold", 0.8).toFloat(),
+                            dx = io.optInt("dx", 0),
+                            dy = io.optInt("dy", 0),
+                        )
+                    },
+                    colorRule = vo.optJSONObject("colorRule")?.let { co ->
+                        ColorRule(
+                            x = co.optInt("x", 0),
+                            y = co.optInt("y", 0),
+                            color = co.optInt("color", 0),
+                            tolerance = co.optInt("tolerance", 40),
+                            action = runCatching {
+                                ColorAction.valueOf(co.optString("action", ColorAction.CLICK_POINT.name))
+                            }.getOrDefault(ColorAction.CLICK_POINT),
+                        )
+                    },
+                    textRule = vo.optJSONObject("textRule")?.let { to ->
+                        TextRule(text = to.optString("text"))
+                    },
+                )
+            }.getOrDefault(VisionConfig()),
         )
     }.getOrNull()
 }

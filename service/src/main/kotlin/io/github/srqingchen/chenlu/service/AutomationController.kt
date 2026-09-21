@@ -140,18 +140,48 @@ object AutomationController {
                     }
                     val config = _state.value.config
                     val targets = config.targets
-                    if (targets.isEmpty() && config.strokes.isEmpty()) {
+                    if (targets.isEmpty() && config.strokes.isEmpty() && !config.vision.enabled) {
                         _state.update {
-                            it.copy(running = false, lastError = "未设置目标点：拖动悬浮球或使用屏幕选点/录制")
+                            it.copy(running = false, lastError = "未设置目标点：拖动悬浮球或使用屏幕选点/录制/视觉触发")
                         }
                         ChenLuLog.e("controller", "目标点为空，任务停止")
                         return@launch
                     }
 
-                    // 注入分支：录制回放 > 滑动 > 点击
+                    // 注入分支：视觉触发 > 录制回放 > 滑动 > 点击
                     val ok: Boolean
                     val feedback: io.github.srqingchen.chenlu.core.model.Point
-                    if (config.strokes.isNotEmpty()) {
+                    var visionStop = false
+                    if (config.vision.enabled) {
+                        if (!io.github.srqingchen.chenlu.service.vision.ScreenCaptor.ready.value) {
+                            ok = false
+                            feedback = io.github.srqingchen.chenlu.core.model.Point.ZERO
+                            if (consecutiveFailures == 0) {
+                                ChenLuLog.w("controller", "视觉触发：屏幕捕获未就绪（请先授权）")
+                            }
+                        } else {
+                            val frame = io.github.srqingchen.chenlu.service.vision.ScreenCaptor.capture()
+                            if (frame == null) {
+                                ok = false
+                                feedback = io.github.srqingchen.chenlu.core.model.Point.ZERO
+                            } else {
+                                val action = io.github.srqingchen.chenlu.service.vision.VisionStore.evaluate(
+                                    frame, config.vision,
+                                )
+                                if (action.stopTask) {
+                                    visionStop = true
+                                    ok = true
+                                    feedback = io.github.srqingchen.chenlu.core.model.Point.ZERO
+                                } else if (action.click != null) {
+                                    ok = engine.tap(action.click, TapSpec(durationMs = config.pressDurationMs))
+                                    feedback = action.click
+                                } else {
+                                    ok = true // 本帧无命中，不算失败
+                                    feedback = io.github.srqingchen.chenlu.core.model.Point.ZERO
+                                }
+                            }
+                        }
+                    } else if (config.strokes.isNotEmpty()) {
                         ok = engine.replay(config.strokes)
                         val first = config.strokes.first().points.first()
                         feedback = io.github.srqingchen.chenlu.core.model.Point(first.x, first.y)
@@ -192,6 +222,12 @@ object AutomationController {
                         }
                         feedback = point
                     }
+                    if (visionStop) {
+                        ChenLuLog.i("controller", "颜色条件触发停止")
+                        _state.update { it.copy(running = false, lastError = null) }
+                        stop()
+                        return@launch
+                    }
                     if (ok) {
                         consecutiveFailures = 0
                         io.github.srqingchen.chenlu.core.data.ClickStats.onClick()
@@ -208,13 +244,17 @@ object AutomationController {
                             }
                         }
                     }
-                    // 防检测：时序抖动（±jitterMs）
-                    val jitterDelayMs = if (config.jitterMs > 0) {
-                        Random.nextInt((-config.jitterMs).toInt(), config.jitterMs.toInt() + 1)
+                    // 防检测：时序抖动（±jitterMs）；视觉触发按检查间隔节流
+                    if (config.vision.enabled) {
+                        delay(config.vision.checkIntervalMs.coerceIn(200L..5000L))
                     } else {
-                        0
+                        val jitterDelayMs = if (config.jitterMs > 0) {
+                            Random.nextInt((-config.jitterMs).toInt(), config.jitterMs.toInt() + 1)
+                        } else {
+                            0
+                        }
+                        delay((config.intervalMs + jitterDelayMs).coerceAtLeast(16L))
                     }
-                    delay((config.intervalMs + jitterDelayMs).coerceAtLeast(16L))
 
                     // 完成条件（总次数 / 总时长）到量自动停止
                     val elapsed = android.os.SystemClock.elapsedRealtime() - startElapsed

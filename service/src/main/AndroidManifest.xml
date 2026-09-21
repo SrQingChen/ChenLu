@@ -12,6 +12,11 @@
         </service>
 
         <service
+            android:name=".VisionCaptureService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
+        <service
             android:name=".tile.ChenLuTileService"
             android:exported="true"
             android:icon="@drawable/ic_stat_chenlu"

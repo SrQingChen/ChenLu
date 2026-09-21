@@ -23,6 +23,7 @@ class ChenLuApp : Application() {
         ShizukuManager.start(this)
         TaskRepository.init(this)
         ClickStats.init(this)
+        io.github.srqingchen.chenlu.service.vision.VisionStore.init(this)
         EngineRegistry.register(AccessibilityInputEngine())
         EngineRegistry.register(ShizukuInputEngine(this))
 

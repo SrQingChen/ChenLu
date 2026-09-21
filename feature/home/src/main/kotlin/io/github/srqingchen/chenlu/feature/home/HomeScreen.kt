@@ -506,6 +506,8 @@ private fun TaskPage(
 
     RecordCard(config = config, shizukuReady = shizukuReady)
 
+    VisionCard(config = config)
+
     GlassCard {
         Text("滑动模式", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
         Row(

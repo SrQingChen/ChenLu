@@ -18,7 +18,38 @@ data class TouchStroke(val pointerId: Int, val points: List<TimedPoint>) {
     val durationMs: Long get() = if (points.size < 2) 0 else points.last().t - points.first().t
 }
 
-/** 连点配置：多点目标 + 节奏 + 顺序 + 完成条件（0 = 不限）+ 滑动模式 + 防检测抖动（0 = 关）+ 录制轨迹。 */
+/** 图片模板规则：找到模板（多尺度）→ 点击其中心 + 偏移。 */
+data class ImageRule(
+    val templateFile: String,
+    val threshold: Float = 0.80f,
+    val dx: Int = 0,
+    val dy: Int = 0,
+)
+
+/** 颜色条件规则。 */
+enum class ColorAction { CLICK_POINT, STOP_TASK }
+
+data class ColorRule(
+    val x: Int,
+    val y: Int,
+    val color: Int,
+    val tolerance: Int = 40,
+    val action: ColorAction = ColorAction.CLICK_POINT,
+)
+
+/** OCR 文字规则：找到包含指定文本的区域 → 点击其中心。 */
+data class TextRule(val text: String)
+
+/** 视觉触发配置：按间隔截屏 → 规则求值 → 动作。 */
+data class VisionConfig(
+    val enabled: Boolean = false,
+    val checkIntervalMs: Long = 500L,
+    val imageRule: ImageRule? = null,
+    val colorRule: ColorRule? = null,
+    val textRule: TextRule? = null,
+)
+
+/** 连点配置：多点目标 + 节奏 + 顺序 + 完成条件（0 = 不限）+ 滑动模式 + 防检测抖动（0 = 关）+ 录制轨迹 + 视觉触发。 */
 data class TapConfig(
     val targets: List<Point> = emptyList(),
     val intervalMs: Long = DEFAULT_INTERVAL_MS,
@@ -33,6 +64,7 @@ data class TapConfig(
     val swipeDy: Float = 0f,
     val swipeDurationMs: Long = 0L,
     val strokes: List<TouchStroke> = emptyList(),
+    val vision: VisionConfig = VisionConfig(),
 ) {
     /** 单点便捷访问（向后兼容用）。 */
     val target: Point get() = targets.firstOrNull() ?: Point.ZERO
