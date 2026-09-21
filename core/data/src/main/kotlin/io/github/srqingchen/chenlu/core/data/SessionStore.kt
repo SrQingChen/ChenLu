@@ -30,15 +30,18 @@ object SessionStore {
         return pref.ifBlank { null }
     }
 
-    fun loadIslandFlags(context: Context): Triple<Boolean, Boolean, Boolean>? {
+    fun loadIslandFlags(context: Context): IslandFlags? {
         val root = load(context) ?: return null
         if (!root.has("islandEnabled")) return null
-        return Triple(
-            root.optBoolean("islandEnabled", true),
-            root.optBoolean("islandCompat", true),
-            root.optBoolean("islandIdle", true),
+        return IslandFlags(
+            enabled = root.optBoolean("islandEnabled", true),
+            compat = root.optBoolean("islandCompat", true),
+            idle = root.optBoolean("islandIdle", true),
+            flow = root.optBoolean("islandFlow", true),
         )
     }
+
+    data class IslandFlags(val enabled: Boolean, val compat: Boolean, val idle: Boolean, val flow: Boolean)
 
     /** 保存当前连点配置（合并写入，其他键保留）。 */
     fun saveConfig(context: Context, config: TapConfig) {
@@ -53,11 +56,12 @@ object SessionStore {
         save(context, root)
     }
 
-    fun saveIslandFlags(context: Context, enabled: Boolean, compat: Boolean, idle: Boolean) {
+    fun saveIslandFlags(context: Context, flags: IslandFlags) {
         val root = load(context) ?: JSONObject()
-        root.put("islandEnabled", enabled)
-        root.put("islandCompat", compat)
-        root.put("islandIdle", idle)
+        root.put("islandEnabled", flags.enabled)
+        root.put("islandCompat", flags.compat)
+        root.put("islandIdle", flags.idle)
+        root.put("islandFlow", flags.flow)
         save(context, root)
     }
 

@@ -58,6 +58,10 @@ object FocusIslandPublisher {
     @Volatile
     var idleEnabled = true
 
+    /** 能量流动模式：无限任务时进度环做色相旋转 + 平滑呼吸（观感=流动能量环）。 */
+    @Volatile
+    var flowStyle = true
+
     /**
      * 由 Application 的 ActivityLifecycleCallbacks 维护。
      * 默认 false：进程可能由悬浮球/服务拉起（无 Activity 生命周期），此时视为后台。
@@ -133,22 +137,39 @@ object FocusIslandPublisher {
         elapsedMs: Long,
         taskName: String? = null,
         error: String? = null,
+        firstShow: Boolean = false,
     ) {
         if (!enabled) return
         val appContext = context.applicationContext
         ensureChannel(appContext)
         engageGateIfNeeded(appContext)
         val nm = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val showError = !error.isNullOrBlank()
+        val hasFinish = config.totalClicks > 0 || config.totalDurationMs > 0
+        // 显示进度：有完成条件=真实进度；无限+流动模式=时间驱动呼吸环；否则=计数循环
+        val displayProgress = when {
+            hasFinish -> progressOf(count, config, elapsedMs)
+            flowStyle -> ((elapsedMs % 4000L) / 40L).toInt().coerceIn(0, 100)
+            else -> (count % 100).toInt()
+        }
+        // 环色：错误红 > 流动色相旋转 > 品牌青
+        val colorHex = when {
+            showError -> ACCENT_ERROR
+            flowStyle && !hasFinish -> flowColor(elapsedMs / 300L)
+            else -> ACCENT
+        }
         nm.notify(
             NOTIF_ID,
             buildNotification(
                 appContext,
                 title = "尘露 · 运行中",
                 content = (taskName?.let { "$it · " } ?: "") + runningSummary(config, engineId),
-                progress = progressOf(count, config, elapsedMs),
+                progress = displayProgress,
                 progressText = progressText(count, config, elapsedMs),
                 actionsRunning = true,
                 error = error,
+                colorHex = colorHex,
+                firstShow = firstShow,
             ),
         )
     }
@@ -279,10 +300,11 @@ object FocusIslandPublisher {
         progressText: String,
         actionsRunning: Boolean,
         error: String?,
+        colorHex: String = ACCENT,
+        firstShow: Boolean = false,
     ): android.app.Notification {
         val showError = !error.isNullOrBlank()
         val displayContent = if (showError) "$content · ⚠ $error" else "$content · $progressText"
-        val accent = if (showError) ACCENT_ERROR else ACCENT
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_chenlu)
             .setContentTitle(title)
@@ -308,7 +330,7 @@ object FocusIslandPublisher {
         val extras = Bundle().apply {
             putString(
                 "miui.focus.param",
-                buildFocusJson(title, displayContent, progressText, progress, showError),
+                buildFocusJson(title, displayContent, progressText, progress, colorHex, firstShow),
             )
             putBundle(
                 "miui.focus.pics",
@@ -339,15 +361,22 @@ object FocusIslandPublisher {
         setOnClickPendingIntent(R.id.panel_open, launchIntent(context))
     }
 
-    /** V3 焦点岛参数（business 复用官方 download_progress 模板，进度环真实进度，错误态红色）。 */
+    /** 色相旋转色（能量流动观感）。 */
+    private fun flowColor(step: Long): String {
+        val hsv = floatArrayOf((step * 4f) % 360f, 0.70f, 0.95f)
+        val c = android.graphics.Color.HSVToColor(hsv)
+        return String.format(Locale.US, "#%06X", 0xFFFFFF and c)
+    }
+
+    /** V3 焦点岛参数（business 复用官方 download_progress 模板，进度环/进度条颜色与进度可驱动）。 */
     private fun buildFocusJson(
         title: String,
         content: String,
         progressText: String,
         progress: Int,
-        error: Boolean,
+        colorHex: String,
+        firstShow: Boolean,
     ): String {
-        val accent = if (error) ACCENT_ERROR else ACCENT
         val root = JSONObject().put(
             "param_v2",
             JSONObject()
@@ -362,13 +391,19 @@ object FocusIslandPublisher {
                 .put("islandProperty", 1)
                 .put("islandTimeout", 86400)
                 .put("dismissIsland", false)
-                // 直接以胶囊形态出现（MAA 做法），不先展示展开态
-                .put("islandFirstFloat", false)
+                // 直接以胶囊形态出现；首次出场带光效（MAA 同款字段）
+                .put("islandFirstFloat", firstShow)
+                .apply {
+                    if (firstShow) put("outEffectSrc", "glow")
+                }
                 .put(
                     "chatInfo",
                     JSONObject().put("title", title).put("content", content),
                 )
-                .put("multiProgressInfo", JSONObject().put("progress", progress).put("color", accent))
+                .put(
+                    "multiProgressInfo",
+                    JSONObject().put("progress", progress).put("color", colorHex),
+                )
                 .put(
                     "bigIslandArea",
                     JSONObject().put(
@@ -401,7 +436,7 @@ object FocusIslandPublisher {
                                 "progressInfo",
                                 JSONObject()
                                     .put("progress", progress)
-                                    .put("colorReach", accent)
+                                    .put("colorReach", colorHex)
                                     .put("colorUnReach", ACCENT_UNREACH)
                                     .put("isCCW", true),
                             ),

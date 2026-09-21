@@ -123,7 +123,7 @@ object AutomationController {
         appContext?.let {
             io.github.srqingchen.chenlu.service.island.FocusIslandPublisher.publishRunning(
                 it, count = 0, config = _state.value.config, engineId = engine.id, elapsedMs = 0,
-                taskName = _state.value.taskName,
+                taskName = _state.value.taskName, firstShow = true,
             )
         }
         var lastIslandMs = 0L
@@ -270,9 +270,9 @@ object AutomationController {
                         return@launch
                     }
 
-                    // 超级岛 1Hz 节流刷新
+                    // 超级岛 2Hz 节流刷新（能量流动环更顺滑）
                     val nowMs = android.os.SystemClock.elapsedRealtime()
-                    if (nowMs - lastIslandMs >= 1000L) {
+                    if (nowMs - lastIslandMs >= 500L) {
                         lastIslandMs = nowMs
                         appContext?.let { ctx ->
                             io.github.srqingchen.chenlu.service.island.FocusIslandPublisher.publishRunning(

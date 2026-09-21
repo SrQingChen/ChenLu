@@ -881,9 +881,12 @@ private fun EnginePage(
         fun persistIsland() {
             io.github.srqingchen.chenlu.core.data.SessionStore.saveIslandFlags(
                 context,
-                FocusIslandPublisher.enabled,
-                FocusIslandPublisher.compatMode,
-                FocusIslandPublisher.idleEnabled,
+                io.github.srqingchen.chenlu.core.data.SessionStore.IslandFlags(
+                    FocusIslandPublisher.enabled,
+                    FocusIslandPublisher.compatMode,
+                    FocusIslandPublisher.idleEnabled,
+                    FocusIslandPublisher.flowStyle,
+                ),
             )
         }
         Row(
@@ -924,6 +927,20 @@ private fun EnginePage(
                 checked = FocusIslandPublisher.idleEnabled,
                 onCheckedChange = {
                     FocusIslandPublisher.idleEnabled = it
+                    persistIsland()
+                },
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("能量流动环（彩虹呼吸）", style = MaterialTheme.typography.bodyMedium)
+            Switch(
+                checked = FocusIslandPublisher.flowStyle,
+                onCheckedChange = {
+                    FocusIslandPublisher.flowStyle = it
                     persistIsland()
                 },
             )

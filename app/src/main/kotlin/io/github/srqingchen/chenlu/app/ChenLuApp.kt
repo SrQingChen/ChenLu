@@ -31,10 +31,11 @@ class ChenLuApp : Application() {
         AutomationController.attachContext(this)
         SessionStore.loadConfig(this)?.let(AutomationController::restoreConfig)
         SessionStore.loadEnginePreference(this)?.let(EngineRegistry::setPreference)
-        SessionStore.loadIslandFlags(this)?.let { (enabled, compat, idle) ->
-            FocusIslandPublisher.enabled = enabled
-            FocusIslandPublisher.compatMode = compat
-            FocusIslandPublisher.idleEnabled = idle
+        SessionStore.loadIslandFlags(this)?.let { flags ->
+            FocusIslandPublisher.enabled = flags.enabled
+            FocusIslandPublisher.compatMode = flags.compat
+            FocusIslandPublisher.idleEnabled = flags.idle
+            FocusIslandPublisher.flowStyle = flags.flow
         }
 
         // 前后台监听：离开应用上待命岛，回应用收起
