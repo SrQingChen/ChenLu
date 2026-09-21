@@ -10,7 +10,15 @@ data class Point(val x: Float, val y: Float) {
 /** 多目标点击顺序：顺序循环 / 随机（防检测地基）。 */
 enum class TargetOrder { SEQUENTIAL, RANDOM }
 
-/** 连点配置：多点目标 + 节奏 + 顺序 + 完成条件（0 = 不限）+ 滑动模式 + 防检测抖动（0 = 关）。 */
+/** 带相对时间戳（ms）的轨迹点。 */
+data class TimedPoint(val t: Long, val x: Float, val y: Float)
+
+/** 一次录制的单指轨迹（首点=按下，末点=抬起）。 */
+data class TouchStroke(val pointerId: Int, val points: List<TimedPoint>) {
+    val durationMs: Long get() = if (points.size < 2) 0 else points.last().t - points.first().t
+}
+
+/** 连点配置：多点目标 + 节奏 + 顺序 + 完成条件（0 = 不限）+ 滑动模式 + 防检测抖动（0 = 关）+ 录制轨迹。 */
 data class TapConfig(
     val targets: List<Point> = emptyList(),
     val intervalMs: Long = DEFAULT_INTERVAL_MS,
@@ -24,6 +32,7 @@ data class TapConfig(
     val swipeDx: Float = 0f,
     val swipeDy: Float = 0f,
     val swipeDurationMs: Long = 0L,
+    val strokes: List<TouchStroke> = emptyList(),
 ) {
     /** 单点便捷访问（向后兼容用）。 */
     val target: Point get() = targets.firstOrNull() ?: Point.ZERO
@@ -31,6 +40,8 @@ data class TapConfig(
     fun hasFinishCondition(): Boolean = totalClicks > 0 || totalDurationMs > 0
 
     fun swipeEnabled(): Boolean = swipeDurationMs > 0L
+
+    fun recordingEnabled(): Boolean = strokes.isNotEmpty()
 
     companion object {
         const val DEFAULT_INTERVAL_MS = 100L

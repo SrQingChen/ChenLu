@@ -190,6 +190,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                     AppSection.TASK -> TaskPage(
                         runState = runState,
                         overlayGranted = overlayGranted,
+                        shizukuReady = shizukuState is ShizukuState.Ready,
                         onIntervalChange = { ms ->
                             AutomationController.updateConfig { it.copy(intervalMs = ms) }
                         },
@@ -437,6 +438,7 @@ private fun QuickPermRow(label: String, granted: Boolean) {
 private fun TaskPage(
     runState: AutomationRunState,
     overlayGranted: Boolean,
+    shizukuReady: Boolean,
     onIntervalChange: (Long) -> Unit,
     onPressChange: (Long) -> Unit,
     onOrderChange: (TargetOrder) -> Unit,
@@ -496,6 +498,8 @@ private fun TaskPage(
     }
 
     FinishConditionCard(config = config)
+
+    RecordCard(config = config, shizukuReady = shizukuReady)
 
     GlassCard {
         Text("滑动模式", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
@@ -593,7 +597,60 @@ private fun TaskPage(
     TaskLibraryCard(onSave = onSaveTask, onLoad = onLoadTask, onDelete = onDeleteTask)
 }
 
-/** 完成条件：总次数 / 总时长（0 = 不限），驱动岛上的真实进度与自动停止。 */
+/** 录制回放：getevent 硬件级录制真实手势 → 存任务 → 循环回放。 */
+@Composable
+private fun RecordCard(config: TapConfig, shizukuReady: Boolean) {
+    val context = LocalContext.current
+    val isRecording by ShizukuManager.isRecording.collectAsStateWithLifecycle()
+    GlassCard {
+        Text("录制回放", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        if (isRecording) {
+            Button(
+                onClick = {
+                    io.github.srqingchen.chenlu.service.record.GestureRecorder.stop(context)
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("停止录制") }
+            Text(
+                "录制中……现在去屏幕上做手势，完成后点悬浮球或此处停止",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.tertiary,
+            )
+        } else {
+            FilledTonalButton(
+                onClick = {
+                    io.github.srqingchen.chenlu.service.record.GestureRecorder.start()
+                },
+                enabled = shizukuReady,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("开始录制") }
+            if (!shizukuReady) {
+                Text(
+                    "录制需要 Shizuku 就绪（读取触屏硬件事件流）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+        if (config.strokes.isNotEmpty()) {
+            Text(
+                "已加载轨迹：${config.strokes.size} 指 · 最长 ${config.strokes.maxOf { it.durationMs }}ms · " +
+                    "${config.strokes.sumOf { it.points.size.toLong() }} 点",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                "运行任务 = 循环回放该轨迹（间隔为循环间隙；Shizuku 引擎回放第一指，多指还原需无障碍引擎）",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            TextButton(onClick = { io.github.srqingchen.chenlu.service.record.GestureRecorder.clear() }) {
+                Text("清除录制（恢复连点模式）")
+            }
+        }
+    }
+}
+
 @Composable
 private fun FinishConditionCard(config: TapConfig) {
     var clicks by remember(config.totalClicks) {

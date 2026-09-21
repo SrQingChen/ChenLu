@@ -80,16 +80,40 @@ class ChenLuAccessibilityService : AccessibilityService() {
         }
 
         private suspend fun dispatchStroke(path: Path, durationMs: Long): Boolean {
-            val service = instance ?: run {
-                ChenLuLog.e("accessibility", "服务实例为空：无障碍未开启或已被系统回收")
-                return false
-            }
             val stroke = GestureDescription.StrokeDescription(
                 path,
                 0L,
                 durationMs.coerceIn(1L, 60_000L),
             )
-            val gesture = GestureDescription.Builder().addStroke(stroke).build()
+            return dispatch(GestureDescription.Builder().addStroke(stroke).build())
+        }
+
+        /** 回放录制轨迹：每指一条 stroke，按录制相对时间偏移（≤10 指）。 */
+        suspend fun dispatchStrokes(strokes: List<io.github.srqingchen.chenlu.core.model.TouchStroke>): Boolean {
+            if (strokes.isEmpty()) return false
+            val t0 = strokes.minOf { it.points.first().t }
+            val builder = GestureDescription.Builder()
+            strokes.take(10).forEach { s ->
+                val path = Path()
+                s.points.forEachIndexed { i, p ->
+                    if (i == 0) path.moveTo(p.x, p.y) else path.lineTo(p.x, p.y)
+                }
+                builder.addStroke(
+                    GestureDescription.StrokeDescription(
+                        path,
+                        (s.points.first().t - t0).coerceAtLeast(0L),
+                        s.durationMs.coerceIn(1L, 60_000L),
+                    ),
+                )
+            }
+            return dispatch(builder.build())
+        }
+
+        private suspend fun dispatch(gesture: GestureDescription): Boolean {
+            val service = instance ?: run {
+                ChenLuLog.e("accessibility", "服务实例为空：无障碍未开启或已被系统回收")
+                return false
+            }
             return suspendCancellableCoroutine { cont ->
                 val dispatched = service.dispatchGesture(
                     gesture,

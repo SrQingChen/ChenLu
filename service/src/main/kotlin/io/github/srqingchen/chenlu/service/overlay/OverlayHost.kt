@@ -54,7 +54,14 @@ object OverlayHost {
             y = 320
         }
         val view = ControlBallView(appContext).apply {
-            onToggle = { AutomationService.toggle(appContext) }
+            onToggle = {
+                // 录制中：点悬浮球 = 停止录制；否则 = 任务启停
+                if (io.github.srqingchen.chenlu.core.shizuku.ShizukuManager.isRecording.value) {
+                    io.github.srqingchen.chenlu.service.record.GestureRecorder.stop(appContext)
+                } else {
+                    AutomationService.toggle(appContext)
+                }
+            }
             onCenterChanged = { cx, cy -> relocateTarget(appContext, cx, cy) }
             onReleased = { dragged -> if (dragged) snapBallToEdge(appContext) }
         }

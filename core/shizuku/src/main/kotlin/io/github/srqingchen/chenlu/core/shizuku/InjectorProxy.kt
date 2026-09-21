@@ -90,6 +90,65 @@ class InjectorProxy(private val binder: IBinder) {
         }
     }
 
+    /** 开始录制（getevent -t 读触屏节点）。返回 null 表示成功。 */
+    fun recordStart(screenW: Int, screenH: Int): String? {
+        val data = Parcel.obtain()
+        val reply = Parcel.obtain()
+        return try {
+            data.writeInterfaceToken(DESCRIPTOR)
+            data.writeInt(screenW)
+            data.writeInt(screenH)
+            binder.transact(TRANSACTION_RECORD_START, data, reply, 0)
+            reply.readException()
+            val code = reply.readInt()
+            if (code == 0) null else reply.readString().orEmpty()
+        } finally {
+            reply.recycle()
+            data.recycle()
+        }
+    }
+
+    /** 停止录制并取回原始事件（时间为相对调用方处理的绝对 ms，坐标已映射屏幕）。 */
+    fun recordStop(): List<RawEvent> {
+        val data = Parcel.obtain()
+        val reply = Parcel.obtain()
+        return try {
+            data.writeInterfaceToken(DESCRIPTOR)
+            binder.transact(TRANSACTION_RECORD_STOP, data, reply, 0)
+            reply.readException()
+            val count = reply.readInt()
+            if (count <= 0) return emptyList()
+            val times = reply.createLongArray() ?: return emptyList()
+            val tcv = reply.createIntArray() ?: return emptyList()
+            (0 until count).map { i ->
+                RawEvent(times[i], tcv[i * 3], tcv[i * 3 + 1], tcv[i * 3 + 2])
+            }
+        } finally {
+            reply.recycle()
+            data.recycle()
+        }
+    }
+
+    /** 单事件注入（回放用）。@return 1 成功。 */
+    fun injectEvent(action: Int, x: Float, y: Float, downTime: Long, eventTime: Long): Int {
+        val data = Parcel.obtain()
+        val reply = Parcel.obtain()
+        return try {
+            data.writeInterfaceToken(DESCRIPTOR)
+            data.writeInt(action)
+            data.writeFloat(x)
+            data.writeFloat(y)
+            data.writeLong(downTime)
+            data.writeLong(eventTime)
+            binder.transact(TRANSACTION_INJECT_EVENT, data, reply, 0)
+            reply.readException()
+            reply.readInt()
+        } finally {
+            reply.recycle()
+            data.recycle()
+        }
+    }
+
     /** 超级岛兼容模式：block=true 切断 xmsf 联网（云端鉴权 fail-open），false 恢复。 */
     fun xmsfGate(block: Boolean): String? =
         transact2(TRANSACTION_XMSF_GATE) { it.writeInt(if (block) 1 else 0) }
@@ -139,6 +198,9 @@ class InjectorProxy(private val binder: IBinder) {
         private const val TRANSACTION_XMSF_GATE = IBinder.FIRST_CALL_TRANSACTION + 3
         private const val TRANSACTION_ENABLE_ACCESSIBILITY = IBinder.FIRST_CALL_TRANSACTION + 4
         private const val TRANSACTION_INJECT_SWIPE = IBinder.FIRST_CALL_TRANSACTION + 5
+        private const val TRANSACTION_RECORD_START = IBinder.FIRST_CALL_TRANSACTION + 6
+        private const val TRANSACTION_RECORD_STOP = IBinder.FIRST_CALL_TRANSACTION + 7
+        private const val TRANSACTION_INJECT_EVENT = IBinder.FIRST_CALL_TRANSACTION + 8
         private const val TRANSACTION_DESTROY = 16777114
     }
 }

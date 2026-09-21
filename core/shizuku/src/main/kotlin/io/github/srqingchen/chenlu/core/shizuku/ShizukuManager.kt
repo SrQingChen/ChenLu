@@ -6,17 +6,24 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.IBinder
+import android.view.WindowManager
 import io.github.srqingchen.chenlu.core.common.ChenLuLog
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import rikka.shizuku.Shizuku
 
+/** getevent 原始事件（坐标已映射为屏幕像素）。 */
+data class RawEvent(val t: Long, val type: Int, val code: Int, val value: Int)
+
 /**
- * Shizuku 通道管理：Binder 生命周期、权限三段式、UserService 绑定。
+ * Shizuku 通道管理：Binder 生命周期、权限三段式、UserService 绑定、录制控制。
  * 状态对外以 [state] 暴露，由 app 启动时调用 [start] 开始监听。
  */
 object ShizukuManager {
+
+    private val _isRecording = MutableStateFlow(false)
+    val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
 
     private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
     private const val REQUEST_CODE = 10114
@@ -129,6 +136,35 @@ object ShizukuManager {
     fun xmsfGate(block: Boolean): String? {
         val injector = injector ?: return "注入服务未连接"
         return runCatching { injector.xmsfGate(block) }.getOrElse { it.message }
+    }
+
+    /** 开始录制真实触屏事件（getevent -t）。返回 null 表示成功。 */
+    fun startRecording(): String? {
+        val injector = injector ?: return "注入服务未连接"
+        val ctx = appContext ?: return "上下文未初始化"
+        val bounds = runCatching {
+            ctx.getSystemService(WindowManager::class.java)?.maximumWindowMetrics?.bounds
+        }.getOrNull()
+        val err = runCatching {
+            injector.recordStart(bounds?.width() ?: 0, bounds?.height() ?: 0)
+        }.getOrElse { it.message }
+        if (err == null) {
+            _isRecording.value = true
+            ChenLuLog.i("recorder", "getevent 录制已开始")
+        } else {
+            ChenLuLog.e("recorder", "录制启动失败: $err")
+        }
+        return err
+    }
+
+    /** 停止录制并取回原始事件。 */
+    fun stopRecording(): List<RawEvent> {
+        val injector = injector
+        _isRecording.value = false
+        if (injector == null) return emptyList()
+        val events = runCatching { injector.recordStop() }.getOrElse { emptyList() }
+        ChenLuLog.i("recorder", "录制结束：${events.size} 个原始事件")
+        return events
     }
 
     private fun onBinderAlive() {

@@ -1,6 +1,7 @@
 package io.github.srqingchen.chenlu.engine.api
 
 import io.github.srqingchen.chenlu.core.model.Point
+import io.github.srqingchen.chenlu.core.model.TouchStroke
 import kotlinx.coroutines.flow.StateFlow
 
 /** 引擎静态能力描述（驱动 UI 展示与频率上限约束，数值以实测为准）。 */
@@ -38,6 +39,12 @@ interface InputEngine {
 
     /** 注入一次直线滑动手势（durationMs 为滑动总时长）。 */
     suspend fun swipe(from: Point, to: Point, durationMs: Long): Boolean
+
+    /**
+     * 回放一段录制的手势轨迹（多指）。
+     * 无障碍实现整段多指还原；Shizuku 实现按录制节奏回放第一指。
+     */
+    suspend fun replay(strokes: List<TouchStroke>): Boolean
 
     /**
      * 取消在途手势。dispatchGesture 无公开取消 API，M0 采用

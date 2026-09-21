@@ -41,7 +41,7 @@ class KernelTouchInjector {
     var statusNote: String = ""
         private set
 
-    private class DeviceSpec(
+    class DeviceSpec(
         val path: String,
         val xMin: Float,
         val xMax: Float,
@@ -116,6 +116,28 @@ class KernelTouchInjector {
         }
         return best
     }
+
+    /** 只读探测（不打开设备）：返回触屏节点与量程（录制用——读取不受写权限限制）。 */
+    @Synchronized
+    fun probeSpec(screenW: Int, screenH: Int): DeviceSpec? {
+        for (args in listOf(arrayOf("getevent", "-il"), arrayOf("getevent", "-i"))) {
+            val output = runCatching {
+                val process = ProcessBuilder(*args).redirectErrorStream(true).start()
+                process.inputStream.readBytes().decodeToString().also {
+                    process.waitFor(3, TimeUnit.SECONDS)
+                }
+            }.getOrNull() ?: continue
+            val spec = parseGetevent(output, screenW, screenH)
+            if (spec != null) return spec
+        }
+        probeViaSysfs()?.let { path ->
+            return DeviceSpec(path, 0f, (screenW - 1).toFloat(), 0f, (screenH - 1).toFloat())
+        }
+        return null
+    }
+
+    /** 便捷：仅取节点路径。 */
+    fun probeNodePath(screenW: Int, screenH: Int): String? = probeSpec(screenW, screenH)?.path
 
     /** sysfs 能力位探测：找带 ABS_MT_POSITION_X/Y（且优先有 BTN_TOUCH）的事件节点。 */
     private fun probeViaSysfs(): String? {

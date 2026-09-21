@@ -10,7 +10,7 @@ import org.json.JSONObject
 object TapConfigCodec {
 
     fun toJson(config: TapConfig): String = JSONObject().apply {
-        put("v", 3)
+        put("v", 4)
         put("intervalMs", config.intervalMs)
         put("pressDurationMs", config.pressDurationMs)
         put("order", config.order.name)
@@ -22,6 +22,25 @@ object TapConfigCodec {
         put("swipeDx", config.swipeDx.toDouble())
         put("swipeDy", config.swipeDy.toDouble())
         put("swipeDurationMs", config.swipeDurationMs)
+        if (config.strokes.isNotEmpty()) {
+            put(
+                "strokes",
+                JSONArray().apply {
+                    config.strokes.forEach { s ->
+                        put(
+                            JSONObject().put("pid", s.pointerId).put(
+                                "pts",
+                                JSONArray().apply {
+                                    s.points.forEach { p ->
+                                        put(JSONArray().put(p.t).put(p.x.toDouble()).put(p.y.toDouble()))
+                                    }
+                                },
+                            ),
+                        )
+                    }
+                },
+            )
+        }
         put("targets", JSONArray().apply {
             config.targets.forEach { p ->
                 put(JSONArray().put(p.x.toDouble()).put(p.y.toDouble()))
@@ -53,6 +72,32 @@ object TapConfigCodec {
             swipeDx = o.optDouble("swipeDx", 0.0).toFloat(),
             swipeDy = o.optDouble("swipeDy", 0.0).toFloat(),
             swipeDurationMs = o.optLong("swipeDurationMs", 0L),
+            strokes = runCatching {
+                val arr = o.optJSONArray("strokes") ?: JSONArray()
+                buildList {
+                    for (i in 0 until arr.length()) {
+                        val so = arr.getJSONObject(i)
+                        val pts = so.optJSONArray("pts") ?: JSONArray()
+                        add(
+                            TouchStroke(
+                                pointerId = so.optInt("pid", 0),
+                                points = buildList {
+                                    for (j in 0 until pts.length()) {
+                                        val p = pts.getJSONArray(j)
+                                        add(
+                                            TimedPoint(
+                                                p.getLong(0),
+                                                p.getDouble(1).toFloat(),
+                                                p.getDouble(2).toFloat(),
+                                            ),
+                                        )
+                                    }
+                                },
+                            ),
+                        )
+                    }
+                }
+            }.getOrDefault(emptyList()),
         )
     }.getOrNull()
 }

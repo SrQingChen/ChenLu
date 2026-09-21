@@ -1,6 +1,7 @@
 package io.github.srqingchen.chenlu.engine.accessibility
 
 import io.github.srqingchen.chenlu.core.model.Point
+import io.github.srqingchen.chenlu.core.model.TouchStroke
 import io.github.srqingchen.chenlu.engine.api.EngineCapabilities
 import io.github.srqingchen.chenlu.engine.api.EngineState
 import io.github.srqingchen.chenlu.engine.api.InputEngine
@@ -44,6 +45,9 @@ class AccessibilityInputEngine : InputEngine {
 
     override suspend fun swipe(from: Point, to: Point, durationMs: Long): Boolean =
         ChenLuAccessibilityService.dispatchSwipe(from.x, from.y, to.x, to.y, durationMs)
+
+    override suspend fun replay(strokes: List<TouchStroke>): Boolean =
+        ChenLuAccessibilityService.dispatchStrokes(strokes)
 
     override suspend fun cancel() {
         // M0：短手势 + 间隔等待模式，无在途手势；M1 手势链引入后实现

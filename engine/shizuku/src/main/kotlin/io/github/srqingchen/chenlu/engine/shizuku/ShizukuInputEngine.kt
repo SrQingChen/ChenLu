@@ -2,6 +2,7 @@ package io.github.srqingchen.chenlu.engine.shizuku
 
 import io.github.srqingchen.chenlu.core.common.ChenLuLog
 import io.github.srqingchen.chenlu.core.model.Point
+import io.github.srqingchen.chenlu.core.model.TouchStroke
 import io.github.srqingchen.chenlu.core.shizuku.InjectorService
 import io.github.srqingchen.chenlu.core.shizuku.ShizukuManager
 import io.github.srqingchen.chenlu.core.shizuku.ShizukuState
@@ -142,6 +143,49 @@ class ShizukuInputEngine(private val appContext: Context? = null) : InputEngine 
                 }
             }
         }
+
+    /** 回放录制轨迹：按录制节奏逐事件注入（多指录制仅回放第一指，多指需无障碍引擎）。 */
+    override suspend fun replay(strokes: List<TouchStroke>): Boolean = withContext(Dispatchers.IO) {
+        val injector = ShizukuManager.injector
+        if (injector == null) {
+            ChenLuLog.e("shizuku", "回放失败：注入服务未连接")
+            return@withContext false
+        }
+        if (strokes.isEmpty()) return@withContext false
+        if (strokes.size > 1) {
+            ChenLuLog.w("shizuku", "录制含 ${strokes.size} 指：Shizuku 回放仅支持第一指（多指需无障碍引擎）")
+        }
+        val pts = strokes.first().points
+        if (pts.size < 2) return@withContext false
+        val t0 = pts.first().t
+        val downTime = android.os.SystemClock.uptimeMillis()
+        val startElapsed = android.os.SystemClock.elapsedRealtime()
+        var ok = injector.injectEvent(
+            android.view.MotionEvent.ACTION_DOWN, pts[0].x, pts[0].y, downTime, downTime,
+        ) == 1
+        for (i in 1 until pts.size) {
+            if (!ok) break
+            val p = pts[i]
+            val wait = startElapsed + (p.t - t0) - android.os.SystemClock.elapsedRealtime()
+            if (wait > 0) kotlinx.coroutines.delay(wait)
+            ok = injector.injectEvent(
+                android.view.MotionEvent.ACTION_MOVE, p.x, p.y, downTime,
+                android.os.SystemClock.uptimeMillis(),
+            ) == 1
+        }
+        if (ok) {
+            val last = pts.last()
+            ok = injector.injectEvent(
+                android.view.MotionEvent.ACTION_UP, last.x, last.y, downTime,
+                android.os.SystemClock.uptimeMillis(),
+            ) == 1
+        }
+        if (!ok) {
+            val detail = runCatching { injector.lastError() }.getOrDefault("")
+            ChenLuLog.e("shizuku", "轨迹回放中断: $detail")
+        }
+        ok
+    }
 
     override suspend fun cancel() {
         // 注入为瞬时 DOWN/UP，无在途手势链；M1 手势链引入后实现

@@ -116,52 +116,62 @@ object AutomationController {
                     }
                     val config = _state.value.config
                     val targets = config.targets
-                    if (targets.isEmpty()) {
+                    if (targets.isEmpty() && config.strokes.isEmpty()) {
                         _state.update {
-                            it.copy(running = false, lastError = "未设置目标点：拖动悬浮球或使用屏幕选点")
+                            it.copy(running = false, lastError = "未设置目标点：拖动悬浮球或使用屏幕选点/录制")
                         }
                         ChenLuLog.e("controller", "目标点为空，任务停止")
                         return@launch
                     }
-                    val point0 = when {
-                        targets.size == 1 -> targets[0]
-                        config.order == TargetOrder.RANDOM -> targets[Random.nextInt(targets.size)]
-                        else -> targets[seqIndex++ % targets.size]
-                    }
-                    // 防检测：坐标随机偏移
-                    val point = if (config.jitterPx > 0) {
-                        val r = config.jitterPx
-                        io.github.srqingchen.chenlu.core.model.Point(
-                            point0.x + (Random.nextInt(r * 2 + 1) - r),
-                            point0.y + (Random.nextInt(r * 2 + 1) - r),
-                        )
-                    } else {
-                        point0
-                    }
-                    // 按压时长抖动（防检测）
-                    val pressMs = if (config.jitterPressMs > 0) {
-                        (config.pressDurationMs +
-                            Random.nextInt(
-                                (-config.jitterPressMs).toInt(),
-                                config.jitterPressMs.toInt() + 1,
-                            )).coerceAtLeast(10L)
-                    } else {
-                        config.pressDurationMs
-                    }
 
-                    val ok = if (config.swipeEnabled()) {
-                        val swipeTo = io.github.srqingchen.chenlu.core.model.Point(
-                            point.x + config.swipeDx,
-                            point.y + config.swipeDy,
-                        )
-                        engine.swipe(point, swipeTo, config.swipeDurationMs)
+                    // 注入分支：录制回放 > 滑动 > 点击
+                    val ok: Boolean
+                    val feedback: io.github.srqingchen.chenlu.core.model.Point
+                    if (config.strokes.isNotEmpty()) {
+                        ok = engine.replay(config.strokes)
+                        val first = config.strokes.first().points.first()
+                        feedback = io.github.srqingchen.chenlu.core.model.Point(first.x, first.y)
                     } else {
-                        engine.tap(point, TapSpec(durationMs = pressMs))
+                        val point0 = when {
+                            targets.size == 1 -> targets[0]
+                            config.order == TargetOrder.RANDOM -> targets[Random.nextInt(targets.size)]
+                            else -> targets[seqIndex++ % targets.size]
+                        }
+                        // 防检测：坐标随机偏移
+                        val point = if (config.jitterPx > 0) {
+                            val r = config.jitterPx
+                            io.github.srqingchen.chenlu.core.model.Point(
+                                point0.x + (Random.nextInt(r * 2 + 1) - r),
+                                point0.y + (Random.nextInt(r * 2 + 1) - r),
+                            )
+                        } else {
+                            point0
+                        }
+                        // 按压时长抖动（防检测）
+                        val pressMs = if (config.jitterPressMs > 0) {
+                            (config.pressDurationMs +
+                                Random.nextInt(
+                                    (-config.jitterPressMs).toInt(),
+                                    config.jitterPressMs.toInt() + 1,
+                                )).coerceAtLeast(10L)
+                        } else {
+                            config.pressDurationMs
+                        }
+                        ok = if (config.swipeEnabled()) {
+                            val swipeTo = io.github.srqingchen.chenlu.core.model.Point(
+                                point.x + config.swipeDx,
+                                point.y + config.swipeDy,
+                            )
+                            engine.swipe(point, swipeTo, config.swipeDurationMs)
+                        } else {
+                            engine.tap(point, TapSpec(durationMs = pressMs))
+                        }
+                        feedback = point
                     }
                     if (ok) {
                         consecutiveFailures = 0
                         io.github.srqingchen.chenlu.core.data.ClickStats.onClick()
-                        notifyClick(point)
+                        notifyClick(feedback)
                         _state.update { it.copy(executedCount = it.executedCount + 1L, lastError = null) }
                     } else {                        consecutiveFailures++
                         if (consecutiveFailures == FAILURE_THRESHOLD) {

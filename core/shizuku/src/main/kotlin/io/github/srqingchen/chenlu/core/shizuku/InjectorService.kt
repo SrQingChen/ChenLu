@@ -94,6 +94,45 @@ class InjectorService : Binder() {
                 return true
             }
 
+            TRANSACTION_RECORD_START -> {
+                data.enforceInterface(DESCRIPTOR)
+                val screenW = data.readInt()
+                val screenH = data.readInt()
+                val (code, msg) = runCatching { recordStart(screenW, screenH) }
+                    .getOrElse { -1 to (it.message ?: "record error") }
+                reply?.writeNoException()
+                reply?.writeInt(code)
+                reply?.writeString(msg)
+                return true
+            }
+
+            TRANSACTION_RECORD_STOP -> {
+                data.enforceInterface(DESCRIPTOR)
+                val (times, tcv) = runCatching { recordStop() }
+                    .getOrElse { LongArray(0) to IntArray(0) }
+                reply?.writeNoException()
+                reply?.writeInt(times.size)
+                if (times.isNotEmpty()) {
+                    reply?.writeLongArray(times)
+                    reply?.writeIntArray(tcv)
+                }
+                return true
+            }
+
+            TRANSACTION_INJECT_EVENT -> {
+                data.enforceInterface(DESCRIPTOR)
+                val action = data.readInt()
+                val x = data.readFloat()
+                val y = data.readFloat()
+                val downTime = data.readLong()
+                val eventTime = data.readLong()
+                val ok = runCatching { injectSingleEvent(action, x, y, downTime, eventTime) }
+                    .getOrDefault(false)
+                reply?.writeNoException()
+                reply?.writeInt(if (ok) 1 else 0)
+                return true
+            }
+
             TRANSACTION_DESTROY -> {
                 reply?.writeNoException()
                 Thread {
@@ -304,6 +343,115 @@ class InjectorService : Binder() {
         RESULT_FAIL
     }
 
+    // ---------------- 录制（getevent -t 只读流，不受写权限限制） ----------------
+
+    private val recordLock = Any()
+    private val recordLines = mutableListOf<String>()
+    private var recordProcess: Process? = null
+    private var recordThread: Thread? = null
+    private var recordSpec: KernelTouchInjector.DeviceSpec? = null
+    private var recordScreenW = 0
+    private var recordScreenH = 0
+
+    @Volatile
+    private var recording = false
+
+    /** 开始录制：起 getevent -t 流式读取触屏节点，后台线程收集行。 */
+    private fun recordStart(screenW: Int, screenH: Int): Pair<Int, String> {
+        if (recording) return 0 to "already"
+        val spec = kernelInjector.probeSpec(screenW, screenH)
+            ?: return -1 to "未找到触屏节点"
+        val process = runCatching {
+            ProcessBuilder("getevent", "-t", spec.path).start()
+        }.getOrElse { return -1 to "启动 getevent 失败: ${it.message}" }
+        synchronized(recordLock) {
+            recordLines.clear()
+            recordProcess = process
+        }
+        recordSpec = spec
+        recordScreenW = screenW
+        recordScreenH = screenH
+        recording = true
+        recordThread = Thread {
+            runCatching {
+                val reader = process.inputStream.bufferedReader()
+                while (recording) {
+                    val line = reader.readLine() ?: break
+                    synchronized(recordLock) {
+                        if (recordLines.size < MAX_RECORD_LINES) recordLines.add(line)
+                    }
+                }
+            }
+        }.apply {
+            isDaemon = true
+            start()
+        }
+        return 0 to spec.path
+    }
+
+    /** 停止录制并回传原始事件（时间戳 ms + 设备坐标已映射为屏幕坐标）。 */
+    private fun recordStop(): Pair<LongArray, IntArray> {
+        recording = false
+        recordProcess?.destroy()
+        recordThread?.join(800)
+        recordProcess = null
+        recordThread = null
+        val spec = recordSpec
+        val xScale = if (spec != null && spec.xMax > spec.xMin && recordScreenW > 1) {
+            (recordScreenW - 1).toFloat() / (spec.xMax - spec.xMin)
+        } else {
+            1f
+        }
+        val yScale = if (spec != null && spec.yMax > spec.yMin && recordScreenH > 1) {
+            (recordScreenH - 1).toFloat() / (spec.yMax - spec.yMin)
+        } else {
+            1f
+        }
+        val xOff = spec?.xMin ?: 0f
+        val yOff = spec?.yMin ?: 0f
+
+        val lines = synchronized(recordLock) { recordLines.toList() }
+        val times = ArrayList<Long>(lines.size)
+        val tcv = ArrayList<Int>(lines.size * 3)
+        for (line in lines) {
+            val m = GETEVENT_LINE.find(line) ?: continue
+            val (sec, usec, typeHex, codeHex, value) = m.destructured
+            times.add(sec.toLong() * 1000L + usec.padEnd(6, '0').take(3).toLong())
+            var v = value.toInt()
+            val code = codeHex.toInt(16)
+            if (spec != null) {
+                v = when (code) {
+                    ABS_MT_POSITION_X_CODE -> ((v - xOff) * xScale).toInt()
+                    ABS_MT_POSITION_Y_CODE -> ((v - yOff) * yScale).toInt()
+                    else -> v
+                }
+            }
+            tcv.add(typeHex.toInt(16))
+            tcv.add(code)
+            tcv.add(v)
+        }
+        return times.toLongArray() to tcv.toIntArray()
+    }
+
+    /** 单事件注入（回放用：客户端按录制节奏驱动）。 */
+    private fun injectSingleEvent(
+        action: Int,
+        x: Float,
+        y: Float,
+        downTime: Long,
+        eventTime: Long,
+    ): Boolean {
+        val im = inputManager ?: return false
+        val event = MotionEvent.obtain(
+            downTime, eventTime, action, x, y,
+            PRESSURE, SIZE, 0, 1f, 1f, 0, 0,
+        ).apply { source = InputDevice.SOURCE_TOUCHSCREEN }
+        val ok = runCatching { invokeInject(im, event) }.getOrDefault(false)
+        event.recycle()
+        if (!ok) lastError = "injectSingleEvent(action=$action) 失败"
+        return ok
+    }
+
     private fun execCommand(timeoutSec: Long = 3, vararg cmd: String): Pair<Int, String> = try {
         val process = ProcessBuilder(*cmd).redirectErrorStream(true).start()
         val output = process.inputStream.readBytes().decodeToString().trim()
@@ -395,7 +543,7 @@ class InjectorService : Binder() {
 
     companion object {
         /** 与 UserServiceArgs.version 联动：不匹配时 Shizuku 自动销毁旧服务进程。 */
-        const val VERSION = 8
+        const val VERSION = 9
 
         const val RESULT_FAIL = 0
         const val RESULT_OK = 1
@@ -412,6 +560,18 @@ class InjectorService : Binder() {
         private const val TRANSACTION_XMSF_GATE = IBinder.FIRST_CALL_TRANSACTION + 3
         private const val TRANSACTION_ENABLE_ACCESSIBILITY = IBinder.FIRST_CALL_TRANSACTION + 4
         private const val TRANSACTION_INJECT_SWIPE = IBinder.FIRST_CALL_TRANSACTION + 5
+        private const val TRANSACTION_RECORD_START = IBinder.FIRST_CALL_TRANSACTION + 6
+        private const val TRANSACTION_RECORD_STOP = IBinder.FIRST_CALL_TRANSACTION + 7
+        private const val TRANSACTION_INJECT_EVENT = IBinder.FIRST_CALL_TRANSACTION + 8
+
+        private const val MAX_RECORD_LINES = 40_000
+        private const val ABS_MT_POSITION_X_CODE = 0x35
+        private const val ABS_MT_POSITION_Y_CODE = 0x36
+
+        /** getevent -t 行：[  1234.567890] (可选设备前缀) 0003 0035 0720 */
+        private val GETEVENT_LINE = Regex(
+            "\\[\\s*(\\d+)\\.(\\d+)\\]\\s*(?:/dev/input/\\S+:\\s*)?([0-9a-fA-F]{4})\\s+([0-9a-fA-F]{4})\\s+(-?\\d+)",
+        )
 
         private const val PRESSURE = 1f
         private const val SIZE = 1f
